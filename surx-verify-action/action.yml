@@ -1,0 +1,28 @@
+name: "surx-verify"
+description: "Verify Ed25519 signature and integrity of a .surx dataset container. Fails the job on tampering."
+branding: {icon: "shield", color: "green"}
+inputs:
+  path:
+    description: "Path to the .surx container"
+    required: true
+  pubkey:
+    description: "Path to the Ed25519 public key PEM. Omit for self-attested check (integrity only, not identity)."
+    required: false
+    default: ""
+  surframe-version:
+    description: "surframe version to install"
+    required: false
+    default: ">=0.2.0"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: pip install "surframe${{ inputs.surframe-version }}"
+    - shell: bash
+      run: |
+        if [ -n "${{ inputs.pubkey }}" ]; then
+          surx verify "${{ inputs.path }}" --pubkey "${{ inputs.pubkey }}"
+        else
+          echo "::warning::No pubkey provided - self-attested verification (integrity only)"
+          surx verify "${{ inputs.path }}"
+        fi

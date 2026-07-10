@@ -1,0 +1,12 @@
+services:
+  registry:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      REGISTRY_KEY_PASSPHRASE: ${REGISTRY_KEY_PASSPHRASE:?definila en .env}
+      REGISTRY_BASE_URL: ${REGISTRY_BASE_URL:-http://localhost:8000}
+      REGISTRY_TSA_URL: ${REGISTRY_TSA_URL:-https://freetsa.org/tsr}
+      REGISTRY_LS_VARIANTS: ${REGISTRY_LS_VARIANTS:-}
+    volumes: ["registry_data:/data"]
+volumes:
+  registry_data:

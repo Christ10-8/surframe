@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+cryptography>=42
+rfc3161ng>=2.1.3

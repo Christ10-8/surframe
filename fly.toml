@@ -1,0 +1,19 @@
+# fly launch --no-deploy  →  fly secrets set REGISTRY_KEY_PASSPHRASE=...  →  fly deploy
+app = "surx-registry"
+primary_region = "gru"
+
+[build]
+
+[env]
+  REGISTRY_BASE_URL = "https://surx-registry.fly.dev"
+  REGISTRY_TSA_URL = "https://freetsa.org/tsr"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  min_machines_running = 1
+
+[mounts]
+  source = "registry_data"
+  destination = "/data"

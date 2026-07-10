@@ -1,0 +1,20 @@
+name: CI
+on:
+  push: {branches: [main]}
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: {python-version: ["3.10", "3.12"]}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python-version }}"}
+      - run: pip install -e . && pip install -r registry/requirements.txt httpx
+      - name: Security & integrity battery (38 checks)
+        run: python tests/test_v020.py
+      - name: Registry security battery (24 checks)
+        run: python registry/tests/test_registry.py
+      - name: Provenance demo (end-to-end)
+        run: python examples/provenance_demo.py

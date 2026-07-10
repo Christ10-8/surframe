@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SURFRAME — signed, tamper-evident dataset containers</title>
+<meta name="description" content="Ship datasets like signed binaries. Ed25519 signatures, column encryption, and a public transparency log. pip install surframe.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,700;1,6..72,500;1,6..72,700&family=Public+Sans:wght@400;600;700&family=Spline+Sans+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F3; --ink:#14213D; --seal:#1B7F5C; --stamp:#B3402A;
+  --line:#C9CFCB; --mut:#5B6770; --card:#FFFFFF;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{background:var(--paper);color:var(--ink);font:16px/1.6 "Public Sans",system-ui,sans-serif}
+a{color:var(--ink)} a:focus-visible,button:focus-visible{outline:3px solid var(--seal);outline-offset:2px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.mono{font-family:"Spline Sans Mono",monospace}
+.eyebrow{font:600 12px/1 "Spline Sans Mono",monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
+
+/* header */
+header{border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0}
+.brand{font:700 20px "Newsreader",serif;letter-spacing:.01em}
+.brand b{color:var(--seal)}
+.nav-links{display:flex;gap:26px;font-size:14px}
+.nav-links a{text-decoration:none;color:var(--mut)}
+.nav-links a:hover{color:var(--ink)}
+
+/* hero */
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;padding:76px 0 84px;align-items:center}
+h1{font:500 52px/1.08 "Newsreader",serif;letter-spacing:-.01em}
+h1 em{font-style:italic;font-weight:700;color:var(--seal)}
+.lede{margin:22px 0 30px;font-size:18px;color:var(--mut);max-width:44ch}
+.install{display:inline-flex;align-items:center;gap:14px;background:var(--ink);color:#fff;
+  padding:14px 20px;font:600 15px "Spline Sans Mono",monospace;border:0;cursor:pointer}
+.install span{color:#8FB8A8}
+.hero-sub{margin-top:14px;font-size:13px;color:var(--mut)}
+.hero-sub a{color:var(--ink)}
+
+/* signature: the ledger card */
+.ledger{background:var(--card);border:1px solid var(--line);box-shadow:8px 8px 0 rgba(20,33,61,.08)}
+.ledger-head{display:flex;justify-content:space-between;align-items:center;
+  border-bottom:1px solid var(--line);padding:14px 20px}
+.ledger-head .eyebrow{color:var(--ink)}
+.badge{padding:6px 12px;border:2px solid var(--seal);color:var(--seal);
+  font:600 12px/1 "Spline Sans Mono",monospace;letter-spacing:.12em;transition:all .25s}
+.ledger.bad .badge{border-color:var(--stamp);color:var(--stamp)}
+.ledger dl{padding:8px 20px 14px}
+.lrow{display:grid;grid-template-columns:112px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+.lrow:last-child{border-bottom:0}
+.lrow dt{color:var(--mut)}
+.lrow dd{font-family:"Spline Sans Mono",monospace;word-break:break-all}
+#root-line{transition:color .25s}
+.ledger.bad #root-line{color:var(--stamp);text-decoration:line-through}
+#diff-line{display:none;color:var(--stamp)}
+.ledger.bad #diff-line{display:block}
+.ledger-foot{border-top:1px solid var(--line);padding:14px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.poison{background:none;border:1px solid var(--stamp);color:var(--stamp);padding:9px 14px;
+  font:600 12px "Spline Sans Mono",monospace;letter-spacing:.08em;cursor:pointer}
+.poison:hover{background:var(--stamp);color:#fff}
+.restore{background:none;border:1px solid var(--line);color:var(--mut);padding:9px 14px;
+  font:600 12px "Spline Sans Mono",monospace;cursor:pointer;display:none}
+.ledger.bad .restore{display:inline-block}
+.ledger.bad .poison{display:none}
+.foot-note{font-size:12px;color:var(--mut)}
+
+/* sections */
+section{padding:72px 0;border-top:1px solid var(--line)}
+h2{font:700 32px/1.2 "Newsreader",serif;margin:8px 0 34px}
+.why{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);background:var(--card)}
+.why div{padding:26px;border-right:1px solid var(--line)}
+.why div:last-child{border-right:0}
+.why h3{font:700 17px "Public Sans",sans-serif;margin-bottom:10px}
+.why p{font-size:14px;color:var(--mut)}
+.why .mono{font-size:12.5px;color:var(--ink)}
+
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.step{background:var(--card);border:1px solid var(--line);padding:22px}
+.step .eyebrow{color:var(--seal)}
+.step h3{font:700 17px "Public Sans";margin:10px 0 8px}
+.step p{font-size:14px;color:var(--mut);margin-bottom:14px}
+.code{background:var(--ink);color:#E8ECEA;padding:14px;font:400 12.5px/1.7 "Spline Sans Mono",monospace;overflow-x:auto;white-space:pre}
+.code .c{color:#8FB8A8}.code .r{color:#E8A090}
+
+.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.tier{background:var(--card);border:1px solid var(--line);padding:26px;display:flex;flex-direction:column}
+.tier.feat{border:2px solid var(--seal)}
+.tier h3{font:700 18px "Public Sans"}
+.price{font:700 40px/1 "Newsreader",serif;margin:14px 0 4px}
+.price small{font:400 14px "Public Sans";color:var(--mut)}
+.tier ul{list-style:none;margin:16px 0 22px;flex:1}
+.tier li{font-size:14px;color:var(--mut);padding:7px 0;border-bottom:1px solid var(--line)}
+.tier li b{color:var(--ink)}
+.cta{display:block;text-align:center;text-decoration:none;padding:13px;font:600 14px "Public Sans"}
+.cta.dark{background:var(--ink);color:#fff}
+.cta.ghost{border:1px solid var(--ink)}
+
+.verifybar{background:var(--card);border:1px solid var(--line);padding:26px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.verifybar input{flex:1;min-width:220px;border:1px solid var(--line);padding:12px;font:400 14px "Spline Sans Mono",monospace;background:var(--paper)}
+.verifybar button{background:var(--seal);color:#fff;border:0;padding:12px 22px;font:600 14px "Public Sans";cursor:pointer}
+
+footer{padding:44px 0 60px;color:var(--mut);font-size:14px}
+footer .cols{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
+footer a{color:var(--mut)} footer a:hover{color:var(--ink)}
+
+@media(max-width:900px){
+  .hero{grid-template-columns:1fr;padding:52px 0 60px}
+  h1{font-size:40px}
+  .why,.steps,.tiers{grid-template-columns:1fr}
+  .why div{border-right:0;border-bottom:1px solid var(--line)}
+  .why div:last-child{border-bottom:0}
+}
+</style>
+</head>
+<body>
+
+<header><div class="wrap nav">
+  <div class="brand">SUR<b>FRAME</b></div>
+  <nav class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#pricing">Pricing</a>
+    <a href="/docs/API.md">API</a>
+    <a href="https://github.com/Christ10-8/surframe">GitHub</a>
+  </nav>
+</div></header>
+
+<div class="wrap hero">
+  <div>
+    <div class="eyebrow">A supply chain for data</div>
+    <h1>Ship datasets like <em>signed</em> binaries.</h1>
+    <p class="lede">A .surx container is a queryable dataset with an Ed25519 signature,
+    encrypted columns, and an audit trail. Verification names the exact file that changed —
+    and a public transparency log makes the proof independent of you.</p>
+    <button class="install mono" onclick="navigator.clipboard&&navigator.clipboard.writeText('pip install surframe');this.querySelector('span').textContent='· copied'">
+      pip install surframe <span>· copy</span>
+    </button>
+    <p class="hero-sub">Apache-2.0 · Python 3.10+ · verify is free, forever ·
+    <a href="THREAT_MODEL.md">read the threat model</a></p>
+  </div>
+
+  <!-- signature element: a live log entry you can attack -->
+  <div class="ledger" id="ledger" aria-live="polite">
+    <div class="ledger-head">
+      <span class="eyebrow">log entry #1042</span>
+      <span class="badge" id="badge">VERIFIED</span>
+    </div>
+    <dl>
+      <div class="lrow"><dt>dataset</dt><dd>finetune-v3.surx · 3,000 rows</dd></div>
+      <div class="lrow"><dt>root</dt><dd id="root-line">9f2a…c41e (sha-256, 11 entries)</dd></div>
+      <div class="lrow" id="diff-line"><dt>changed</dt><dd>chunks/source=vendor/part-000001.parquet</dd></div>
+      <div class="lrow"><dt>signer</dt><dd>data-team@release-v3</dd></div>
+      <div class="lrow"><dt>sealed</dt><dd>2026-07-08T14:02:11Z · RFC 3161</dd></div>
+      <div class="lrow"><dt>chain</dt><dd>prev 55c1…09be → this 8e7d…f210</dd></div>
+    </dl>
+    <div class="ledger-foot">
+      <button class="poison" id="poison">FLIP ONE BYTE</button>
+      <button class="restore" id="restore">restore dataset</button>
+      <span class="foot-note" id="footnote">This is what your CI sees. Try to sneak a change past it.</span>
+    </div>
+  </div>
+</div>
+
+<section id="why"><div class="wrap">
+  <div class="eyebrow">Why this exists</div>
+  <h2>Data ships naked. Software never does.</h2>
+  <div class="why">
+    <div>
+      <h3>Provenance that survives the handoff</h3>
+      <p>Training sets, evals and client deliverables move through vendors, buckets and laptops.
+      A signature proves who produced <span class="mono">exactly these bytes</span> — long after they left your infra.</p>
+    </div>
+    <div>
+      <h3>Failure that names itself</h3>
+      <p>Checksum mismatch tells you nothing. <span class="mono">surx verify</span> reports the
+      exact entry modified, added or removed — and whether the audit log was rewritten. Exit 1 stops the pipeline.</p>
+    </div>
+    <div>
+      <h3>PII travels sealed, data stays usable</h3>
+      <p>Encrypt columns, not files. Recipients query everything else without the passphrase;
+      sidecars are cryptographically bound so they can't be spliced between containers.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="how"><div class="wrap">
+  <div class="eyebrow">Three commands</div>
+  <h2>From DataFrame to public proof.</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="eyebrow">01 · sign</div>
+      <h3>Seal it locally</h3>
+      <p>Write the container, encrypt sensitive columns, sign with your key.</p>
+      <div class="code">surx write data.csv trainset.surx
+surx encrypt trainset.surx pii_col
+surx sign trainset.surx --key team.key</div>
+    </div>
+    <div class="step">
+      <div class="eyebrow">02 · notarize</div>
+      <h3>Anchor it publicly</h3>
+      <p>One call appends it to the transparency log. The proof no longer depends on trusting you.</p>
+      <div class="code">surx seal trainset.surx
+<span class="c"># → seal sf-00001042 · log #1042</span>
+<span class="c"># → https://…/s/sf-00001042</span></div>
+    </div>
+    <div class="step">
+      <div class="eyebrow">03 · verify</div>
+      <h3>Anyone checks, free</h3>
+      <p>Consumers and CI verify offline against the seal, online against the log.</p>
+      <div class="code">surx check-seal trainset.surx
+<span class="c"># local ✓ issuer ✓ registry ✓</span>
+<span class="r"># tampered → names the chunk, exit 1</span></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+  <div class="eyebrow">Pricing</div>
+  <h2>Verification is free. Sealing is the product.</h2>
+  <div class="tiers">
+    <div class="tier">
+      <h3>Open</h3>
+      <div class="price">$0<small> forever</small></div>
+      <ul>
+        <li><b>Unlimited</b> local signing &amp; verifying</li>
+        <li><b>10</b> notarized seals / month</li>
+        <li>Public verification pages &amp; README badges</li>
+        <li>Apache-2.0 library &amp; CLI</li>
+      </ul>
+      <a class="cta ghost" href="https://github.com/Christ10-8/surframe">Start on GitHub</a>
+    </div>
+    <div class="tier feat">
+      <h3>Pro</h3>
+      <div class="price">$19<small> / month</small></div>
+      <ul>
+        <li><b>500</b> notarized seals / month</li>
+        <li>RFC 3161 timestamps on every seal</li>
+        <li>Signed log checkpoints (anti-rollback)</li>
+        <li>Email support</li>
+      </ul>
+      <a class="cta dark" href="#" data-ls="pro">Get Pro</a>
+    </div>
+    <div class="tier">
+      <h3>Business</h3>
+      <div class="price">$99<small> / month</small></div>
+      <ul>
+        <li><b>5,000</b> notarized seals / month</li>
+        <li>Everything in Pro</li>
+        <li>Self-hosting support &amp; onboarding</li>
+        <li>Priority fixes</li>
+      </ul>
+      <a class="cta ghost" href="#" data-ls="business">Get Business</a>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="eyebrow">Received a .surx file?</div>
+  <h2>Check a seal.</h2>
+  <div class="verifybar">
+    <input class="mono" id="sealid" placeholder="sf-00001042-ab12cd34" aria-label="Seal id">
+    <button onclick="var v=document.getElementById('sealid').value.trim();if(v)location.href='/s/'+encodeURIComponent(v)">Verify in the log</button>
+    <span class="foot-note">Or offline: <span class="mono">surx check-seal file.surx</span></span>
+  </div>
+</div></section>
+
+<footer><div class="wrap cols">
+  <div>SURFRAME · seals for the data supply chain</div>
+  <div>
+    <a href="https://github.com/Christ10-8/surframe">GitHub</a> ·
+    <a href="THREAT_MODEL.md">Threat model</a> ·
+    <a href="docs/API.md">API</a> ·
+    <a href="TERMS.md">Terms</a> ·
+    <a href="PRIVACY.md">Privacy</a>
+  </div>
+</div></footer>
+
+<script>
+(function(){
+  var L=document.getElementById('ledger'),B=document.getElementById('badge'),
+      F=document.getElementById('footnote');
+  document.getElementById('poison').addEventListener('click',function(){
+    L.classList.add('bad');B.textContent='TAMPERED';
+    F.textContent='Caught. The exact chunk — not a vague checksum mismatch.';
+  });
+  document.getElementById('restore').addEventListener('click',function(){
+    L.classList.remove('bad');B.textContent='VERIFIED';
+    F.textContent='This is what your CI sees. Try to sneak a change past it.';
+  });
+})();
+</script>
+</body>
+</html>
