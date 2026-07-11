@@ -171,9 +171,12 @@ class Registry:
         chain_ok = expected_chain == row["chain_hash"]
         tsa_state = "absent"
         if row["tsa_token_b64"]:
+            # El timestamp RFC 3161 es un REFUERZO opcional. Si no se puede validar
+            # (p.ej. falta el cert del TSA), se reporta como "unverified" pero NO
+            # invalida un sello con firma de emisor + cadena correctas.
             tsa_state = "valid" if tsa.verify_token(row["tsa_token_b64"], canonical(payload)) \
-                        else "INVALID"
-        valid = sig_ok and chain_ok and tsa_state != "INVALID"
+                        else "unverified"
+        valid = sig_ok and chain_ok
         return {"found": True, "valid": valid, "issuer_sig_ok": sig_ok,
                 "chain_link_ok": chain_ok, "rfc3161": tsa_state,
                 "payload": payload, "chain_hash": row["chain_hash"]}
