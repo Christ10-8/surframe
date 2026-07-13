@@ -6,3 +6,10 @@ build/
 *.surx
 *.key
 .venv/
+
+MARKETING.md
+BUSINESS.md
+PROSPECTS.md
+HIS_TODO.md
+launch/POSTS.md
+POSTS.md
