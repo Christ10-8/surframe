@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Bateria v0.2.0: demuestra cada fix con un ataque/escenario real."""
-import io, json, hashlib, os, shutil, sys, zipfile
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import io, json, hashlib, os, shutil, sys, tempfile, zipfile
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO_ROOT)
 
 import pandas as pd
 import surframe
@@ -12,7 +13,7 @@ from surframe import (encrypt_columns_in_surx, decrypt_columns_in_surx,
 
 os.environ["SURX_AUDIT"] = "1"
 os.environ["SURX_AUDIT_SIGN"] = "1"
-WORK = "/tmp/sf_tests"
+WORK = os.path.join(tempfile.gettempdir(), "sf_tests")  # portable Linux/Windows
 shutil.rmtree(WORK, ignore_errors=True)
 os.makedirs(WORK)
 PASS, FAIL = [], []
@@ -199,8 +200,9 @@ print("\n== T8: decrypt_columns_in_surx (nuevo) ==")
 p = fresh("t8")
 encrypt_columns_in_surx(p, ["dni", "salario"], "clave123")
 decrypt_columns_in_surx(p, ["dni"], "clave123")
-zf = zipfile.ZipFile(p)
-check("side-car de dni eliminado", not any("dni.bin" in n for n in zf.namelist()))
+with zipfile.ZipFile(p) as zf:
+    _names = zf.namelist()
+check("side-car de dni eliminado", not any("dni.bin" in n for n in _names))
 df = surframe.read(p, columns=["dni"])          # sin passphrase: ya es plano
 check("dni vuelve a texto plano", df["dni"].iloc[5] == "D00005")
 df = surframe.read(p, columns=["salario"], passphrase="clave123")
@@ -209,14 +211,17 @@ check("salario sigue cifrado y legible", float(df["salario"].iloc[5]) == 1005.0)
 print("\n== T9: concurrencia - 2 procesos x 10 appends de auditoria ==")
 p = fresh("t9")
 append_audit_event(p, {"op": "init"})
-code = f'''
-import sys, os; sys.path.insert(0, "{os.path.dirname(WORK)}/..")
-sys.path.insert(0, "/home/claude/surframe_work/src")
-os.environ["SURX_AUDIT_SIGN"]="1"
-from surframe import append_audit_event
-for i in range(10):
-    append_audit_event("{p}", {{"op": "w", "proc": sys.argv[1], "i": i}})
-'''
+# El helper se ejecuta como subproceso: inyectamos REPO_ROOT y el path del
+# contenedor con repr() para que sean literales Python validos en cualquier SO
+# (en Windows los backslashes reventaban como secuencias de escape).
+code = (
+    "import sys, os\n"
+    f"sys.path.insert(0, {REPO_ROOT!r})\n"
+    'os.environ["SURX_AUDIT_SIGN"] = "1"\n'
+    "from surframe import append_audit_event\n"
+    "for i in range(10):\n"
+    f"    append_audit_event({p!r}, {{'op': 'w', 'proc': sys.argv[1], 'i': i}})\n"
+)
 open(f"{WORK}/w.py", "w").write(code)
 import subprocess
 procs = [subprocess.Popen([sys.executable, f"{WORK}/w.py", str(k)]) for k in (1, 2)]
@@ -231,9 +236,11 @@ p = f"{WORK}/t10.surx"
 df10 = pd.DataFrame({"user_id": range(60), "api_key": [f"sk-{i:04d}" for i in range(60)],
                      "latency_ms": [10.0 + i for i in range(60)]})
 surframe.write(df10, p)                                  # en 0.1.5: ValueError
-zf = zipfile.ZipFile(p)
-check("escribe sin particion", any(n.startswith("chunks/") for n in zf.namelist()))
-check("manifest sin particiones", json.loads(zf.read("manifest.json"))["partitions"] == [])
+with zipfile.ZipFile(p) as zf:                           # cerrar antes de encrypt:
+    _names = zf.namelist()                              # en Windows, os.replace falla
+    _manifest = json.loads(zf.read("manifest.json"))    # si el .surx sigue abierto
+check("escribe sin particion", any(n.startswith("chunks/") for n in _names))
+check("manifest sin particiones", _manifest["partitions"] == [])
 encrypt_columns_in_surx(p, ["api_key"], "pw")
 kp = generate_keypair(); sign_container(p, kp.private_hex)
 check("sign+verify sin particion", verify_container(p, kp.public_hex)["valid"])
@@ -245,9 +252,10 @@ p = f"{WORK}/t11.surx"
 df11 = pd.DataFrame({"model": ["gpt", "claude", "llama"] * 20,
                      "score": [0.5 + i * 0.001 for i in range(60)]})
 surframe.write(df11, p, partition_by=["model"])
-zf = zipfile.ZipFile(p)
-check("chunks por model=", any("model=claude" in n for n in zf.namelist()))
-check("bloom con nombre dinamico", "indexes/model.bloom.json" in zf.namelist())
+with zipfile.ZipFile(p) as zf:
+    _names = zf.namelist()
+check("chunks por model=", any("model=claude" in n for n in _names))
+check("bloom con nombre dinamico", "indexes/model.bloom.json" in _names)
 pl = surframe.plan(p, where="model == 'claude'")
 check("pruning por columna custom (1 de 3 chunks)",
       pl["candidates_count"] == 1 and "model=claude" in pl["candidate_paths"][0],
@@ -276,6 +284,36 @@ try:
     check("sign se niega sobre zip ambiguo", False)
 except ValueError:
     check("sign se niega sobre zip ambiguo", True)
+
+print("\n== T13: contenedor corrupto a nivel deflate no crashea verify_container ==")
+# Regresion 0.3.1: un byte volteado DENTRO del stream comprimido de una entrada
+# firmada dejaba el directorio central intacto (ZipFile abre) pero zf.read()
+# tiraba zlib.error/BadZipFile crudo. verify_container ahora lo envuelve.
+p = fresh("t13")
+kp = generate_keypair()
+sign_container(p, kp.private_hex, signer="t13")
+with zipfile.ZipFile(p) as _zf:
+    _tgt = next(zi for zi in _zf.infolist()
+                if zi.filename.endswith(".parquet")
+                and zi.compress_type == zipfile.ZIP_DEFLATED
+                and zi.compress_size > 60)
+_raw = bytearray(open(p, "rb").read())
+_lh = _tgt.header_offset
+_nl = int.from_bytes(_raw[_lh + 26:_lh + 28], "little")
+_el = int.from_bytes(_raw[_lh + 28:_lh + 30], "little")
+_body = _lh + 30 + _nl + _el
+_raw[_body + _tgt.compress_size // 2] ^= 0xFF   # flip en medio del deflate
+open(p, "wb").write(_raw)
+_crashed = False
+try:
+    rep = verify_container(p, kp.public_hex)
+except Exception as _e:   # noqa: BLE001 — cualquier excepcion cruda = regresion
+    _crashed = True
+    rep = {"valid": None, "reason": f"CRASH {type(_e).__name__}: {_e}"}
+check("verify no tira traceback sobre deflate corrupto", not _crashed, rep["reason"])
+check("verify devuelve reporte limpio invalido",
+      (not _crashed) and rep["valid"] is False and "unreadable" in (rep["reason"] or ""),
+      rep["reason"])
 
 print("\n" + "="*60)
 print(f"RESULTADO: {len(PASS)} PASS / {len(FAIL)} FAIL")

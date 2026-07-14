@@ -1,6 +1,26 @@
-# SURFRAME 0.3.0
+# SURFRAME 0.3.1
 
-- **SURX Registry client**: `seal_container_remote` / `check_seal` + CLI `surx seal` /
+- **`surx export --format ai-act`** (nuevo): genera un *evidence pack* verificable
+  offline desde un `.surx` firmado, mapeado a EU AI Act (Reg. (UE) 2024/1689)
+  Art. 10/11/12. Contenido: `EVIDENCE.json`, `REPORT.md`, `VERIFY.md`,
+  `ai_act_mapping.md`, `audit_chain/` (copia verbatim), `checksums.txt`; opción
+  `--include-container` y `--zip`. Corre `verify_container()` primero y **se niega
+  a generar evidencia** sobre un contenedor manipulado, corrupto o sin firmar
+  (exit 1). Disclaimer legal embebido: atesta integridad/trazabilidad, NO es
+  certificación de conformidad. Módulo nuevo `surframe/export_aiact.py`.
+- **Fix: `verify_container()` ya no crashea con contenedores corruptos.** Un byte
+  volteado dentro del stream deflate de una entrada firmada (directorio central
+  intacto, `zf.read()` falla) tiraba `zlib.error`/`BadZipFile` crudo. Ahora se
+  envuelve y devuelve un reporte limpio `{"valid": False, "reason": "container
+  unreadable: ..."}`. `surx verify` sobre un `.surx` corrupto da exit 1 con
+  mensaje, sin traceback.
+- **Sitio**: nueva página `site/ai-act.html` (landing AI Act, EN). Se retiraron
+  las promesas de "RFC 3161 timestamps" de `site/index.html` (feature no activa en
+  producción); el diferencial Pro queda en sellos + checkpoints firmados + soporte.
+- Baterías: **42 checks** (librería, +2 de regresión del contenedor corrupto) +
+  **19** (export ai-act), todas verdes; cada test ataca el fix que prueba.
+
+
   `surx check-seal` (triple verificación: contenido vs sellado, emisor offline, registro online;
   funciona sin red). Recibo guardado dentro del contenedor sin romper la firma local.
 - **Hardening de estructura zip**: entradas duplicadas, paths absolutos, `..` y backslashes

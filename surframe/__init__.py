@@ -8,7 +8,7 @@ verificador de auditoria, y cifrado multi-llamada sin perdida de datos.
 """
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 # ---- Core: contenedor SURX ----
 from .io import (

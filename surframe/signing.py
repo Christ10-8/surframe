@@ -29,10 +29,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from zipfile import ZipFile
+from zipfile import ZipFile, BadZipFile
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -258,72 +259,80 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
         "modified": [], "missing": [], "added": [],
         "audit": {"consistent": None, "append_only": None, "detail": {}},
     }
-    with ZipFile(path, "r") as zf:
-        names = zf.namelist()
-        problems = _validate_zip_structure(names)
-        if problems:
-            report["reason"] = "estructura de zip insegura: " + "; ".join(problems)
-            return report
-        if SIG_PATH not in names:
-            report["reason"] = "unsigned: no existe signatures/ed25519.json"
-            return report
-        doc = json.loads(zf.read(SIG_PATH))
-        payload = doc.get("payload", {})
-        sig_hex = doc.get("signature", "")
-        report["signer"] = payload.get("signer")
-        report["signed_at"] = payload.get("signed_at")
+    # Un contenedor corrupto a nivel fisico (directorio central roto, stream
+    # deflate con un byte volteado, CRC malo, truncado) NO debe crashear con un
+    # traceback de zipfile/zlib: es simplemente otra forma de "invalido". Lo
+    # envolvemos y devolvemos un reporte limpio, igual que el resto de fallas.
+    try:
+        with ZipFile(path, "r") as zf:
+            names = zf.namelist()
+            problems = _validate_zip_structure(names)
+            if problems:
+                report["reason"] = "estructura de zip insegura: " + "; ".join(problems)
+                return report
+            if SIG_PATH not in names:
+                report["reason"] = "unsigned: no existe signatures/ed25519.json"
+                return report
+            doc = json.loads(zf.read(SIG_PATH))
+            payload = doc.get("payload", {})
+            sig_hex = doc.get("signature", "")
+            report["signer"] = payload.get("signer")
+            report["signed_at"] = payload.get("signed_at")
 
-        # 1) firma criptografica sobre el payload
-        pub_hex = public_key_hex or payload.get("public_key", "")
-        try:
-            pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex))
-            payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                                       separators=(",", ":")).encode("utf-8")
-            pub.verify(bytes.fromhex(sig_hex), payload_bytes)
-        except (InvalidSignature, ValueError):
-            report["reason"] = ("firma invalida: el payload no corresponde a la clave "
-                                + ("provista" if public_key_hex else "embebida"))
-            return report
+            # 1) firma criptografica sobre el payload
+            pub_hex = public_key_hex or payload.get("public_key", "")
+            try:
+                pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex))
+                payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                           separators=(",", ":")).encode("utf-8")
+                pub.verify(bytes.fromhex(sig_hex), payload_bytes)
+            except (InvalidSignature, ValueError):
+                report["reason"] = ("firma invalida: el payload no corresponde a la clave "
+                                    + ("provista" if public_key_hex else "embebida"))
+                return report
 
-        # 2) diff de entradas firmadas vs estado actual
-        signed_entries: Dict[str, str] = payload.get("entries", {})
-        current = _entry_hashes(zf)
-        report["missing"] = sorted(set(signed_entries) - set(current))
-        report["added"] = sorted(set(current) - set(signed_entries))
-        report["modified"] = sorted(
-            n for n in set(signed_entries) & set(current)
-            if signed_entries[n] != current[n]
-        )
-        entries_ok = (not report["missing"] and not report["added"]
-                      and not report["modified"]
-                      and _entries_root(current) == payload.get("entries_root"))
+            # 2) diff de entradas firmadas vs estado actual
+            signed_entries: Dict[str, str] = payload.get("entries", {})
+            current = _entry_hashes(zf)
+            report["missing"] = sorted(set(signed_entries) - set(current))
+            report["added"] = sorted(set(current) - set(signed_entries))
+            report["modified"] = sorted(
+                n for n in set(signed_entries) & set(current)
+                if signed_entries[n] != current[n]
+            )
+            entries_ok = (not report["missing"] and not report["added"]
+                          and not report["modified"]
+                          and _entries_root(current) == payload.get("entries_root"))
 
-        # 3) auditoria: consistente Y append-only respecto del head firmado
-        signed_heads: Dict[str, str] = payload.get("audit_heads", {})
-        audit_ok = True
-        for fname in sorted(set(_audit_files(zf)) | set(signed_heads)):
-            det: Dict[str, Any] = {}
-            if fname not in names:
-                det = {"status": "missing", "signed_head": signed_heads.get(fname)}
-                audit_ok = False
-            else:
-                hashes, ok, bad = _chain_walk(zf.read(fname))
-                det["events"] = len(hashes)
-                if not ok:
-                    det["status"] = f"chain_broken_at_line_{bad}"
+            # 3) auditoria: consistente Y append-only respecto del head firmado
+            signed_heads: Dict[str, str] = payload.get("audit_heads", {})
+            audit_ok = True
+            for fname in sorted(set(_audit_files(zf)) | set(signed_heads)):
+                det: Dict[str, Any] = {}
+                if fname not in names:
+                    det = {"status": "missing", "signed_head": signed_heads.get(fname)}
                     audit_ok = False
                 else:
-                    sh = signed_heads.get(fname)
-                    if sh is None:
-                        det["status"] = "new_file_after_signing"
-                    elif sh == GENESIS or sh in hashes:
-                        det["status"] = "append_only_ok"
-                    else:
-                        det["status"] = "history_rewritten"
+                    hashes, ok, bad = _chain_walk(zf.read(fname))
+                    det["events"] = len(hashes)
+                    if not ok:
+                        det["status"] = f"chain_broken_at_line_{bad}"
                         audit_ok = False
-            report["audit"]["detail"][fname] = det
-        report["audit"]["consistent"] = audit_ok
-        report["audit"]["append_only"] = audit_ok
+                    else:
+                        sh = signed_heads.get(fname)
+                        if sh is None:
+                            det["status"] = "new_file_after_signing"
+                        elif sh == GENESIS or sh in hashes:
+                            det["status"] = "append_only_ok"
+                        else:
+                            det["status"] = "history_rewritten"
+                            audit_ok = False
+                report["audit"]["detail"][fname] = det
+            report["audit"]["consistent"] = audit_ok
+            report["audit"]["append_only"] = audit_ok
+    except (BadZipFile, zlib.error, OSError, EOFError, json.JSONDecodeError) as exc:
+        report["reason"] = f"container unreadable: {type(exc).__name__}: {exc}"
+        return report
 
     report["valid"] = bool(entries_ok and audit_ok)
     if not report["valid"] and report["reason"] is None:

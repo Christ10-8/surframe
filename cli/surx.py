@@ -211,6 +211,51 @@ def audit_verify(path: str):
 
 
 @app.command()
+def export(path: str,
+           format: str = typer.Option("ai-act", "--format", help="Pack format (ai-act)"),
+           output: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory"),
+           pubkey: Optional[str] = typer.Option(None, "--pubkey", help="Producer public key file (else self-attested)"),
+           include_container: bool = typer.Option(False, "--include-container", help="Embed the .surx in the pack"),
+           zip: bool = typer.Option(False, "--zip", help="Package as .zip"),
+           declare: Optional[List[str]] = typer.Option(None, "--declare", "-d",
+               help="Producer declaration, repeatable: -d 'purpose=training data'")):
+    """Genera un evidence pack verificable offline (EU AI Act Art. 10/11/12). Exit 0/1."""
+    if format != "ai-act":
+        typer.secho(f"Unsupported format: {format}. Available: ai-act", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+    declarations = {}
+    for item in declare or []:
+        if "=" not in item:
+            typer.secho(f"Invalid declaration (expected key=value): {item}", fg=typer.colors.RED)
+            raise typer.Exit(code=2)
+        k, _, v = item.partition("=")
+        declarations[k.strip()] = v.strip()
+    pub_hex = None
+    if pubkey:
+        from surframe.signing import load_public_key
+        pub_hex = load_public_key(pubkey)
+    from surframe.export_aiact import build_evidence_pack
+    try:
+        ev = build_evidence_pack(path, output_dir=output, public_key_hex=pub_hex,
+                                 include_container=include_container,
+                                 declarations=declarations, as_zip=zip)
+    except RuntimeError as exc:
+        typer.secho(f"\n  ✗ {exc}\n", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(code=1)
+    s = ev["signature"]
+    typer.secho("\n  ✓ Evidence pack generated", fg=typer.colors.GREEN, bold=True)
+    typer.echo(f"  location : {ev['_pack_path']}")
+    typer.echo(f"  container: {ev['container']['filename']} (sha256 {ev['container']['sha256'][:16]}…)")
+    typer.echo(f"  signature: ed25519 · signer {s['signer']} · "
+               f"{'trusted key' if s['trusted_key_provided'] else 'self-attested'}")
+    typer.echo(f"  audit    : {ev['audit_chain'].get('events_total')} events · chain anchored under signature")
+    typer.echo("  contents : EVIDENCE.json, REPORT.md, VERIFY.md, ai_act_mapping.md, audit_chain/, checksums.txt")
+    if not include_container:
+        typer.echo("  note     : container referenced by hash (use --include-container to embed)")
+    typer.echo("")
+
+
+@app.command()
 def seal(path: str,
          api_key: str = typer.Option(..., envvar="SURX_REGISTRY_KEY"),
          registry: str = typer.Option("https://surx-registry.fly.dev", envvar="SURX_REGISTRY_URL")):

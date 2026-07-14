@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SURFRAME for the EU AI Act — verifiable dataset evidence for Articles 10, 11 & 12</title>
+<meta name="description" content="The EU AI Act's high-risk obligations apply from 2 August 2026. Generate offline-verifiable evidence packs for your training data with one command: surx export --format ai-act.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,700;1,6..72,500;1,6..72,700&family=Public+Sans:wght@400;600;700&family=Spline+Sans+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F3; --ink:#14213D; --seal:#1B7F5C; --stamp:#B3402A;
+  --line:#C9CFCB; --mut:#5B6770; --card:#FFFFFF;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{background:var(--paper);color:var(--ink);font:16px/1.6 "Public Sans",system-ui,sans-serif}
+a{color:var(--ink)} a:focus-visible,button:focus-visible{outline:3px solid var(--seal);outline-offset:2px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.mono{font-family:"Spline Sans Mono",monospace}
+.eyebrow{font:600 12px/1 "Spline Sans Mono",monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
+header{border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0}
+.brand{font:700 20px "Newsreader",serif;letter-spacing:.01em;text-decoration:none}
+.brand b{color:var(--seal)}
+.nav-links{display:flex;gap:26px;font-size:14px}
+.nav-links a{text-decoration:none;color:var(--mut)}
+.nav-links a:hover{color:var(--ink)}
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;padding:76px 0 64px;align-items:center}
+h1{font:500 48px/1.1 "Newsreader",serif;letter-spacing:-.01em}
+h1 em{font-style:italic;font-weight:700;color:var(--seal)}
+.lede{margin:22px 0 30px;font-size:18px;color:var(--mut);max-width:46ch}
+.install{display:inline-flex;align-items:center;gap:14px;background:var(--ink);color:#fff;
+  padding:14px 20px;font:600 15px "Spline Sans Mono",monospace;border:0;cursor:pointer;text-decoration:none}
+.install span{color:#8FB8A8}
+.hero-sub{margin-top:14px;font-size:13px;color:var(--mut)}
+.hero-sub a{color:var(--ink)}
+.deadline{background:var(--card);border:1px solid var(--line);box-shadow:8px 8px 0 rgba(20,33,61,.08);padding:26px}
+.deadline .date{font:700 42px/1 "Newsreader",serif;color:var(--stamp)}
+.deadline p{margin-top:12px;font-size:14px;color:var(--mut)}
+section{padding:56px 0;border-top:1px solid var(--line)}
+h2{font:500 32px/1.2 "Newsreader",serif;margin-bottom:8px}
+h2 em{font-style:italic;font-weight:700;color:var(--seal)}
+.sub{color:var(--mut);max-width:60ch;margin-bottom:32px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);font-size:14px}
+th,td{padding:14px 16px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 12px/1 "Spline Sans Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+td .mono{font-size:13px;color:var(--seal)}
+pre{background:var(--ink);color:#E8ECEA;padding:22px;font:14px/1.7 "Spline Sans Mono",monospace;overflow-x:auto}
+pre .c{color:#7C8B99}pre .g{color:#8FB8A8}
+.cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.card{background:var(--card);border:1px solid var(--line);padding:24px}
+.card h3{font:700 17px "Newsreader",serif;margin-bottom:8px}
+.card p{font-size:14px;color:var(--mut)}
+.fine{margin-top:28px;padding:18px 22px;border-left:3px solid var(--stamp);background:var(--card);font-size:13px;color:var(--mut)}
+footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--mut)}
+footer a{color:var(--mut)}
+@media(max-width:860px){.hero{grid-template-columns:1fr;padding:48px 0}.cols{grid-template-columns:1fr}h1{font-size:36px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/">SUR<b>FRAME</b></a>
+    <nav class="nav-links">
+      <a href="/#how">How it works</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="https://github.com/Christ10-8/surframe/blob/main/docs/API.md">API</a>
+      <a href="https://github.com/Christ10-8/surframe">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap hero">
+  <div>
+    <div class="eyebrow">EU AI Act · Regulation (EU) 2024/1689</div>
+    <h1>Your auditor asks where the data came from. <em>Answer with math.</em></h1>
+    <p class="lede">From 2 August 2026, high-risk AI systems in the EU must document data
+    governance and keep traceable records. SURFRAME turns your training sets into signed,
+    tamper-evident containers — and exports the evidence pack in one command.</p>
+    <a class="install mono" href="https://github.com/Christ10-8/surframe">surx export data.surx --format ai-act <span>· copy</span></a>
+    <p class="hero-sub">Apache-2.0 · verification is free, forever ·
+      <a href="https://github.com/Christ10-8/surframe/blob/main/THREAT_MODEL.md">read the threat model</a></p>
+  </div>
+  <aside class="deadline">
+    <div class="eyebrow">Enforcement date</div>
+    <div class="date">2 Aug 2026</div>
+    <p>High-risk obligations under the AI Act become applicable. Penalties reach
+    €35M or 7% of global turnover. Documentation without integrity guarantees
+    is a promise — not evidence.</p>
+  </aside>
+</div>
+
+<section id="mapping">
+  <div class="wrap">
+    <h2>Three articles. <em>One artifact.</em></h2>
+    <p class="sub">An evidence pack maps directly onto the data requirements a notified body
+    or internal auditor will check. It states what the evidence proves — never more.</p>
+    <table>
+      <tr><th>AI Act requirement</th><th>What the evidence pack contains</th></tr>
+      <tr>
+        <td><strong>Art. 10(2)</strong> — data governance: origin, collection and processing operations</td>
+        <td>Producer declarations (purpose, sources, licensing) plus every transformation event
+        in the container's <span class="mono">audit_chain/</span>, hash-linked and signature-anchored</td>
+      </tr>
+      <tr>
+        <td><strong>Art. 12</strong> — automatic, traceable record-keeping across the lifecycle</td>
+        <td>A verbatim copy of the append-only audit log, cryptographically verified —
+        rewriting the whole chain is still caught by the Ed25519 signature</td>
+      </tr>
+      <tr>
+        <td><strong>Art. 11 / Annex IV(2)(d)</strong> — technical documentation of the datasets</td>
+        <td><span class="mono">EVIDENCE.json</span>: schema, row counts, partitions,
+        SHA-256 of the exact bytes, signer identity and signing time</td>
+      </tr>
+      <tr>
+        <td><strong>Third-party verifiability</strong></td>
+        <td><span class="mono">VERIFY.md</span> — auditor instructions. Offline, open source,
+        exit-code based. No access to your infrastructure required.</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2>From dataset to <em>evidence</em> in three commands.</h2>
+    <p class="sub">The pack refuses to generate if verification fails. This tool cannot
+    produce evidence for tampered data — that's the point.</p>
+<pre>
+<span class="c"># 1 · sign the container you already ship</span>
+surx sign trainset.surx --key team.key --signer data-gov
+
+<span class="c"># 2 · export the evidence pack</span>
+surx export trainset.surx --format ai-act \
+  -d "purpose=Training data, credit scoring model v3" \
+  -d "license=CC-BY-4.0" -d "contact=data-gov@company.com"
+
+<span class="c"># 3 · what the auditor runs — no account, no server, no trust</span>
+surx verify trainset.surx --pubkey team.pub   <span class="g"># exit 0 = intact</span>
+sha256sum -c evidence_pack/checksums.txt      <span class="g"># every file OK</span>
+</pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Why documentation alone <em>fails the audit.</em></h2>
+    <div class="cols">
+      <div class="card">
+        <h3>Data cards & READMEs</h3>
+        <p>Editable after the fact, by anyone, without trace. They describe the dataset —
+        they cannot prove the description matches the bytes that trained the model.</p>
+      </div>
+      <div class="card">
+        <h3>Warehouse metadata & MLOps lineage</h3>
+        <p>Lives inside your infrastructure. Verifying it means trusting your database —
+        which is exactly what an independent audit cannot do.</p>
+      </div>
+      <div class="card">
+        <h3>A signed .surx container</h3>
+        <p>The evidence is the artifact itself. Ed25519 signature over every entry,
+        append-only audit chain, offline verification that names the exact file that changed.</p>
+      </div>
+    </div>
+    <div class="fine"><strong>What we will not tell you:</strong> that this makes you
+    "AI Act compliant". Conformity is a property of your whole system and process.
+    SURFRAME produces the verifiable technical evidence for the data requirements —
+    every generated document says exactly that, and nothing more.</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Received an evidence pack?</h2>
+    <p class="sub">You need <span class="mono">pip install surframe</span> and the
+    instructions inside <span class="mono">VERIFY.md</span>. Verification is free and
+    always will be — for auditors, notified bodies and recipients.</p>
+    <a class="install mono" href="https://github.com/Christ10-8/surframe">pip install surframe <span>· copy</span></a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    SURFRAME · seals for the data supply chain ·
+    <a href="https://github.com/Christ10-8/surframe">GitHub</a> ·
+    <a href="https://github.com/Christ10-8/surframe/blob/main/THREAT_MODEL.md">Threat model</a> ·
+    <a href="https://github.com/Christ10-8/surframe/blob/main/TERMS.md">Terms</a> ·
+    <a href="https://github.com/Christ10-8/surframe/blob/main/PRIVACY.md">Privacy</a>
+  </div>
+</footer>
+
+</body>
+</html>
