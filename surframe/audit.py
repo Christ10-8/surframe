@@ -3,11 +3,11 @@
 
 # surframe/audit.py
 """
-Log de auditoria append-only dentro del .surx (profiles/audit/YYYYMMDD.jsonl).
+Append-only audit log inside the .surx (profiles/audit/YYYYMMDD.jsonl).
 
 v2 (0.2.0):
 - Firma encadenada ACTIVA por defecto (SURX_AUDIT_SIGN=0 para desactivar).
-- Locking entre procesos: dos escritores concurrentes ya no se pisan eventos
+- Cross-process locking: two concurrent writers no longer clobber events
   (en 0.1.5 era last-writer-wins y se perdian lineas).
 - verify_audit_chain(): recorre y valida la cadena completa; en 0.1.5 habia
   codigo para escribirla pero ninguno para verificarla.
@@ -49,7 +49,7 @@ def _whoami() -> str:
 
 @contextmanager
 def _file_lock(target_path: str):
-    """Lock exclusivo entre procesos sobre <target>.lock (fcntl en POSIX,
+    """Cross-process exclusive lock on <target>.lock (fcntl on POSIX,
     msvcrt en Windows, lockfile O_EXCL como ultimo recurso)."""
     lock_path = target_path + ".lock"
     fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR, 0o644)
@@ -107,8 +107,8 @@ def append_audit_event(path: str, event: Dict[str, Any], sign: Optional[bool] = 
     do_sign = bool(sign) if sign is not None else \
         str(_os.environ.get("SURX_AUDIT_SIGN", "1")).lower() in ("1", "true", "yes")
 
-    # Lock ANTES de leer: leer-modificar-escribir tiene que ser atomico
-    # entre procesos, si no dos appends concurrentes se pisan (0.1.5).
+    # Lock BEFORE reading: read-modify-write must be atomic
+    # across processes, otherwise two concurrent appends clobber each other (0.1.5).
     with _file_lock(path):
         existing: Optional[bytes] = None
         try:
@@ -116,7 +116,7 @@ def append_audit_event(path: str, event: Dict[str, Any], sign: Optional[bool] = 
                 if rel_log in zf.namelist():
                     existing = zf.read(rel_log)
         except FileNotFoundError:
-            return  # dataset no existe: nada que auditar
+            return  # dataset does not exist: nothing to audit
 
         if do_sign:
             prev_hash = GENESIS
@@ -140,9 +140,9 @@ def append_audit_event(path: str, event: Dict[str, Any], sign: Optional[bool] = 
 
 
 def verify_audit_chain(path: str) -> Dict[str, Any]:
-    """Valida la cadena de TODOS los archivos de auditoria del contenedor.
+    """Validate the hash chain of ALL audit files in the container.
 
-    Devuelve: {"ok": bool, "files": {nombre: {"events", "signed_events",
+    Returns: {"ok": bool, "files": {name: {"events", "signed_events",
     "ok", "first_bad_line"}}, "total_events": int}
     """
     report: Dict[str, Any] = {"ok": True, "files": {}, "total_events": 0}
@@ -182,7 +182,7 @@ def verify_audit_chain(path: str) -> Dict[str, Any]:
 
 
 def read_audit_events(path: str) -> List[Dict[str, Any]]:
-    """Devuelve todos los eventos de auditoria en orden cronologico de archivo."""
+    """Return all audit events in file chronological order."""
     out: List[Dict[str, Any]] = []
     with ZipFile(path, "r") as zf:
         for name in sorted(n for n in zf.namelist()

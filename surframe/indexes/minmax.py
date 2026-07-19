@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Índice MinMax por chunk para columnas ordenables (ej. timestamps)."""
+"""Per-chunk MinMax index for sortable columns (e.g. timestamps)."""
 
 from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Tuple
@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 def build_minmax_index(values_by_chunk: Dict[str, Iterable[Any]]) -> Dict[str, Tuple[Any, Any]]:
     """
     Recibe: {chunk_id: iterable_de_valores}
-    Devuelve: {chunk_id: (min, max)}
+    Returns: {chunk_id: (min, max)}
     """
     index: Dict[str, Tuple[Any, Any]] = {}
     for cid, it in values_by_chunk.items():
@@ -21,7 +21,7 @@ def build_minmax_index(values_by_chunk: Dict[str, Iterable[Any]]) -> Dict[str, T
 
 def query_minmax(index: Dict[str, Tuple[Any, Any]], op: str, value: Any) -> List[str]:
     """
-    Devuelve chunk_ids candidatos según la condición unaria sobre una columna.
+    Returns candidate chunk_ids according to the unary condition on a column.
     Soporta: '>=', '<=', '>', '<', '=='
     """
     out: List[str] = []

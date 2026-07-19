@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Bloom filter simple (doble hash via hashlib) + helpers para índice por chunk."""
+"""Simple Bloom filter (double hash via hashlib) + per-chunk index helpers."""
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -46,7 +46,7 @@ class Bloom:
 
 def build_bloom_index(values_by_chunk: Dict[str, Iterable[str]], fp_rate: float = 0.01):
     """
-    Devuelve: {chunk_id: Bloom}
+    Returns: {chunk_id: Bloom}
     """
     index: Dict[str, Bloom] = {}
     for cid, vals in values_by_chunk.items():
@@ -60,7 +60,7 @@ def build_bloom_index(values_by_chunk: Dict[str, Iterable[str]], fp_rate: float 
 
 def query_bloom(index: Dict[str, Bloom], value: str) -> List[str]:
     """
-    Devuelve chunk_ids donde el bloom de ese chunk posiblemente contenga 'value'.
+    Returns chunk_ids where that chunk's bloom might contain 'value'.
     """
     out: List[str] = []
     for cid, bloom in index.items():

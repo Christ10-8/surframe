@@ -11,7 +11,7 @@
 
 
 # -*- coding: utf-8 -*-
-"""Utilidades simples para manifest.json (cargar/validar mínima)."""
+"""Simple helpers for manifest.json (load / minimal validation)."""
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -45,4 +45,4 @@ def ensure_minimal(manifest: Dict[str, Any]) -> None:
     required = ["version", "name", "schema"]
     for k in required:
         if k not in manifest:
-            raise ValueError(f"Manifest inválido: falta '{k}'")
+            raise ValueError(f"Invalid manifest: missing '{k}'")

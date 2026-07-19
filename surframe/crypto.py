@@ -11,19 +11,19 @@
 
 # -*- coding: utf-8 -*-
 """
-Cifrado por columna (AES-GCM) con side-cars para SURFRAME.
+Column encryption (AES-GCM) with side-cars for SURFRAME.
 
 v2 (0.2.0):
-- Multi-llamada segura: encrypt_columns_in_surx() reutiliza salt/clave existentes
-  y FUSIONA el meta en vez de pisarlo (bug de perdida de datos en 0.1.5).
-- Verificador de passphrase ("check"): detecta passphrase equivocada ANTES de
-  cifrar nada, y distingue "passphrase incorrecta" de "datos corruptos".
-- AD v2 ata la identidad del contenedor (container_id) ademas de part|col:
-  un side-car no se puede trasplantar entre contenedores.
-- Scrypt N=2**17 (OWASP) para contenedores nuevos; los viejos se leen con los
-  parametros guardados en su config/crypto.json.
+- Safe across calls: encrypt_columns_in_surx() reuses existing salt/key
+  and MERGES the meta instead of overwriting it (data-loss bug in 0.1.5).
+- Passphrase verifier ("check"): detects a wrong passphrase BEFORE encrypting
+  anything, and distinguishes "wrong passphrase" from "corrupt data".
+- AD v2 binds the container identity (container_id) in addition to part|col:
+  a side-car cannot be transplanted between containers.
+- Scrypt N=2**17 (OWASP) for new containers; old ones are read with the
+  parameters stored in their config/crypto.json.
 - Reescritura atomica con fsync (archivo tmp + directorio).
-- decrypt_columns_in_surx(): revierte columnas a texto plano.
+- decrypt_columns_in_surx(): reverts columns back to plaintext.
 """
 from __future__ import annotations
 
@@ -48,16 +48,16 @@ CRYPTO_CONFIG_PATH = "config/crypto.json"
 ENC_DIR = "enc"
 NONCE_SIZE = 12   # bytes
 SALT_SIZE = 16    # bytes
-SCRYPT_N_DEFAULT = 2**17  # OWASP 2024+ para cifrado at-rest (antes 2**14)
+SCRYPT_N_DEFAULT = 2**17  # OWASP 2024+ for at-rest encryption (was 2**14)
 _CHECK_PLAINTEXT = b"surframe-passphrase-check-v2"
 
 
 class WrongPassphrase(ValueError):
-    """La passphrase no coincide con la usada para cifrar este contenedor."""
+    """The passphrase does not match the one used to encrypt this container."""
 
 
 class CorruptCiphertext(ValueError):
-    """Passphrase verificada pero el side-car no autentica: datos alterados."""
+    """Passphrase verified but the side-car fails auth: data was altered."""
 
 
 @dataclass
@@ -72,8 +72,8 @@ class CryptoMeta:
     parts: Dict[str, List[str]]        # part_id -> [cols]
     version: int = 2
     aad_v: int = 2                      # 1 = "part|col" (legacy), 2 = "sf|part|col"
-    container_id: str = ""              # ata side-cars a ESTE contenedor (aad_v=2)
-    check_nonce_hex: str = ""           # verificador de passphrase
+    container_id: str = ""              # binds side-cars to THIS container (aad_v=2)
+    check_nonce_hex: str = ""           # passphrase verifier
     check_ct_hex: str = ""
 
     def to_dict(self) -> dict:
@@ -146,8 +146,8 @@ def _rewrite_zip_with_replacements(
     additions: Dict[str, bytes],
     deletions: Optional[Iterable[str]] = None,
 ) -> None:
-    """Reescribe el .surx de forma atomica y DURABLE:
-    tmp en la misma carpeta + fsync(tmp) + os.replace + fsync(dir).
+    """Rewrite the .surx atomically and DURABLY:
+    tmp in the same folder + fsync(tmp) + os.replace + fsync(dir).
     Sin el fsync, un corte de energia tras el rename puede dejar un zip vacio/corrupto.
     """
     dst_dir = os.path.dirname(os.path.abspath(src_path)) or "."
@@ -186,9 +186,9 @@ def _check_ad(meta: CryptoMeta) -> bytes:
 
 
 def _verify_passphrase(meta: CryptoMeta, key: bytes) -> None:
-    """Valida la passphrase contra el campo 'check'. WrongPassphrase si no coincide."""
+    """Validate the passphrase against the 'check' field. WrongPassphrase if it does not match."""
     if not (meta.check_nonce_hex and meta.check_ct_hex):
-        return  # meta v1: no hay verificador (se valida al primer decrypt)
+        return  # meta v1: no verifier (validated on first decrypt)
     aes = AESGCM(key)
     try:
         aes.decrypt(bytes.fromhex(meta.check_nonce_hex),
@@ -196,38 +196,38 @@ def _verify_passphrase(meta: CryptoMeta, key: bytes) -> None:
                     associated_data=_check_ad(meta))
     except InvalidTag:
         raise WrongPassphrase(
-            "Passphrase incorrecta: no coincide con la usada al cifrar este contenedor."
+            "Wrong passphrase: does not match the one used to encrypt this container."
         )
 
 
 # -------------------- API principal --------------------
 
 def encrypt_columns_in_surx(path: str, cols: Iterable[str], passphrase: str) -> None:
-    """Cifra columnas y las mueve a side-cars AES-GCM.
+    """Encrypt columns and move them into AES-GCM side-cars.
 
-    Seguro para llamadas multiples: si el contenedor ya tiene columnas cifradas,
+    Safe across multiple calls: if the container already has encrypted columns,
     reutiliza la MISMA clave (verificando la passphrase primero) y fusiona el meta.
     En 0.1.5 la segunda llamada regeneraba el salt y pisaba config/crypto.json,
-    dejando indescifrables las columnas de la primera llamada.
+    leaving the first call's columns undecryptable.
     """
     cols = list(dict.fromkeys([c.strip() for c in cols if c and c.strip()]))
     if not cols:
-        raise ValueError("No se especificaron columnas a cifrar")
+        raise ValueError("No columns specified to encrypt")
 
     with ZipFile(path, "r") as zf:
         meta = load_crypto_meta(zf)
 
         if meta is not None:
-            # ---- contenedor ya cifrado: reusar clave, verificar passphrase ----
+            # ---- already-encrypted container: reuse key, verify passphrase ----
             salt = bytes.fromhex(meta.salt_hex)
             key = _derive_key(passphrase.encode("utf-8"), salt,
                               n=meta.scrypt_n, r=meta.scrypt_r, p=meta.scrypt_p)
             if meta.check_nonce_hex:
                 _verify_passphrase(meta, key)
             else:
-                # meta v1 sin verificador: probar contra un side-car existente
+                # meta v1 without verifier: test against an existing side-car
                 _probe_legacy_passphrase(zf, meta, key)
-                # upgrade in-place del meta (mantiene aad_v=1 por compat con side-cars viejos)
+                # in-place meta upgrade (keeps aad_v=1 for compat with old side-cars)
                 meta.version = 2
                 if not meta.container_id:
                     meta.container_id = uuid.uuid4().hex
@@ -237,9 +237,9 @@ def encrypt_columns_in_surx(path: str, cols: Iterable[str], passphrase: str) -> 
             already = [c for c in cols if c in meta.columns]
             cols = [c for c in cols if c not in meta.columns]
             if already and not cols:
-                return  # todo ya estaba cifrado: no-op idempotente
+                return  # everything was already encrypted: idempotent no-op
         else:
-            # ---- primer cifrado: meta v2 nuevo ----
+            # ---- first encryption: new meta v2 ----
             salt = os.urandom(SALT_SIZE)
             key = _derive_key(passphrase.encode("utf-8"), salt)
             meta = CryptoMeta(
@@ -276,9 +276,9 @@ def encrypt_columns_in_surx(path: str, cols: Iterable[str], passphrase: str) -> 
 
         encrypted_now = sorted({c for cl in new_parts.values() for c in cl})
         if not encrypted_now:
-            raise ValueError("Ninguna de las columnas especificadas estaba en texto plano para cifrar.")
+            raise ValueError("None of the specified columns were in plaintext to encrypt.")
 
-        # ---- FUSION (no pisar): union de columnas y parts ----
+        # ---- MERGE (do not overwrite): union of columns and parts ----
         meta.columns = sorted(set(meta.columns) | set(encrypted_now))
         for pid, cl in new_parts.items():
             merged = set(meta.parts.get(pid, [])) | set(cl)
@@ -295,7 +295,7 @@ def encrypt_columns_in_surx(path: str, cols: Iterable[str], passphrase: str) -> 
 
 
 def _probe_legacy_passphrase(zf: ZipFile, meta: CryptoMeta, key: bytes) -> None:
-    """Meta v1 sin 'check': valida la passphrase intentando descifrar un side-car real."""
+    """Meta v1 without 'check': validate passphrase by decrypting a real side-car."""
     aes = AESGCM(key)
     for pid, cl in meta.parts.items():
         for col in cl:
@@ -308,21 +308,21 @@ def _probe_legacy_passphrase(zf: ZipFile, meta: CryptoMeta, key: bytes) -> None:
                     return
                 except InvalidTag:
                     raise WrongPassphrase(
-                        "Passphrase incorrecta: no coincide con la usada al cifrar este contenedor."
+                        "Wrong passphrase: does not match the one used to encrypt this container."
                     )
-    # no hay side-cars que probar: continuar (contenedor cifrado vacio)
+    # no side-cars to test: continue (empty encrypted container)
 
 
 def decrypt_columns_in_surx(path: str, cols: Iterable[str], passphrase: str) -> None:
-    """Revierte columnas cifradas a texto plano dentro de los chunks y elimina side-cars."""
+    """Revert encrypted columns back to plaintext in the chunks and remove side-cars."""
     cols = list(dict.fromkeys([c.strip() for c in cols if c and c.strip()]))
     with ZipFile(path, "r") as zf:
         meta = load_crypto_meta(zf)
         if meta is None:
-            raise ValueError("El contenedor no tiene columnas cifradas.")
+            raise ValueError("The container has no encrypted columns.")
         target = [c for c in cols if c in meta.columns] if cols else list(meta.columns)
         if not target:
-            raise ValueError("Ninguna de las columnas indicadas esta cifrada.")
+            raise ValueError("None of the given columns are encrypted.")
 
         salt = bytes.fromhex(meta.salt_hex)
         key = _derive_key(passphrase.encode("utf-8"), salt,
@@ -418,11 +418,11 @@ def rehydrate_chunk_columns(
         except InvalidTag:
             if meta.check_nonce_hex:
                 raise CorruptCiphertext(
-                    f"Passphrase correcta pero '{enc_name}' no autentica: "
-                    "datos alterados o side-car de otro contenedor.")
-            raise ValueError("Passphrase incorrecta o datos cifrados corruptos")
+                    f"Correct passphrase but '{enc_name}' fails auth: "
+                    "data altered or side-car from another container.")
+            raise ValueError("Wrong passphrase or corrupt encrypted data")
         col_df = pq.read_table(io.BytesIO(plain)).to_pandas()
         if col not in col_df.columns or len(col_df) != len(out):
-            raise ValueError(f"Side-car invalido para {col}")
+            raise ValueError(f"Invalid side-car for {col}")
         out[col] = col_df[col].values
     return out

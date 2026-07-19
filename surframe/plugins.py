@@ -11,7 +11,7 @@
 
 
 # -*- coding: utf-8 -*-
-"""Registro básico de plugins de índices (minmax, bloom)."""
+"""Basic index-plugin registry (minmax, bloom)."""
 
 from __future__ import annotations
 from typing import Callable, Dict, Any

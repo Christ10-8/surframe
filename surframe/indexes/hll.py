@@ -28,7 +28,7 @@ class HLL:
 
     @classmethod
     def create(cls, p: int = 12) -> "HLL":
-        # p=12 => m=4096 registers (buena precisión ~2%)
+        # p=12 => m=4096 registers (good precision ~2%)
         m = 1 << p
         return cls(p=p, m=m, reg=bytearray(m))
 
@@ -36,7 +36,7 @@ class HLL:
         h = _hash64(item)
         idx = h >> (64 - self.p)                  # primeros p bits
         w = (h << self.p) & ((1 << 64) - 1)       # restante (64-p bits)
-        rho = _leading_zeros(w, 64 - self.p) + 1  # posición del primer 1
+        rho = _leading_zeros(w, 64 - self.p) + 1  # position of the first 1
         if rho > 255:
             rho = 255
         if self.reg[idx] < rho:
@@ -50,7 +50,7 @@ class HLL:
                 self.reg[i] = other.reg[i]
 
     def estimate(self) -> float:
-        # Estimación estándar HLL con correcciones
+        # Standard HLL estimation with corrections
         m = float(self.m)
         # α_m
         if self.m == 16:

@@ -10,7 +10,7 @@ from typing import Iterable, List, Tuple, Optional
 import numpy as np
 import pandas as pd
 
-# Reusamos el helper atómico que ya tenés (Windows-safe)
+# Reuse the existing atomic helper (Windows-safe)
 from surframe.crypto import _rewrite_zip_with_replacements  # type: ignore
 
 INDEX_DIR = "indexes/embedding.flat"
@@ -33,11 +33,11 @@ def _list_chunks(zf: zipfile.ZipFile) -> List[Tuple[str, str]]:
 
 
 def _load_snapshot_index_allow(zf: zipfile.ZipFile, as_of: Optional[str]) -> bool:
-    """Devuelve True si el índice es utilizable bajo as_of (None=siempre)."""
+    """Return True if the index is usable under as_of (None=always)."""
     if not as_of:
         return True
-    # Si hay snapshots, verificamos que este índice exista en el snapshot <= as_of
-    # Usamos la heurística simple: si hay archivos en snapshots/, buscamos el más cercano <= as_of
+    # If there are snapshots, check this index exists in the snapshot <= as_of
+    # Simple heuristic: if there are files in snapshots/, find the nearest <= as_of
     snaps = [
         e.filename
         for e in zf.infolist()
@@ -46,12 +46,12 @@ def _load_snapshot_index_allow(zf: zipfile.ZipFile, as_of: Optional[str]) -> boo
     if not snaps:
         return True
     # Formato snapshots/2025...Z.json → extraemos el timestamp
-    snaps_sorted = sorted(snaps)  # lexicográfico sirve por el formato ISO-like
+    snaps_sorted = sorted(snaps)  # lexicographic works thanks to the ISO-like format
     target = None
     if as_of == "latest":
         target = snaps_sorted[-1]
     else:
-        # tomamos el último <= as_of (si no existe exacto)
+        # take the latest <= as_of (if no exact match exists)
         try:
             iso = as_of.replace(":", "").replace("-", "")
             # buscamos primer nombre <= iso traducido burdamente
@@ -65,7 +65,7 @@ def _load_snapshot_index_allow(zf: zipfile.ZipFile, as_of: Optional[str]) -> boo
             target = snaps_sorted[-1]
     if not target:
         return False
-    # Leemos ese snapshot y revisamos que META_PATH esté listado en "indexes"
+    # Read that snapshot and check META_PATH is listed under "indexes"
     with zf.open(target, "r") as f:
         snap = json.loads(f.read().decode("utf-8"))
     indexes = set(snap.get("indexes", []))
@@ -78,39 +78,39 @@ def ann_build(
     metric: str = "cosine",  # o "l2"
     dim: Optional[int] = None,
 ) -> dict:
-    """Construye índice 'flat' (np.dot/argpartition) como side-car dentro del .surx."""
-    assert metric in ("cosine", "l2"), "metric debe ser 'cosine' o 'l2'"
+    """Build a 'flat' index (np.dot/argpartition) as a side-car inside the .surx."""
+    assert metric in ("cosine", "l2"), "metric must be 'cosine' or 'l2'"
     with zipfile.ZipFile(path, "r") as zf:
         chunks = _list_chunks(zf)
         if not chunks:
-            raise ValueError("No se encontraron chunks/*.parquet dentro del SURX")
+            raise ValueError("No chunks/*.parquet found inside the SURX")
         Xs: List[np.ndarray] = []
         mapping: List[Tuple[int, int]] = []  # (chunk_idx, row_idx)
         for ci, (_, pth) in enumerate(chunks):
             with zf.open(pth, "r") as f:
                 df = pd.read_parquet(f, columns=[col])
             if col not in df.columns:
-                raise ValueError(f"Columna '{col}' no existe en {pth}")
+                raise ValueError(f"Column '{col}' does not exist in {pth}")
             # Series de listas/arrays → np.float32[:, dim]
             ser = df[col]
             # normalizamos input a array 2D
             arr = np.asarray(ser.tolist(), dtype=np.float32)
             if arr.ndim != 2:
                 raise ValueError(
-                    f"{col} debe ser 2D (N,D). Encontrado shape={arr.shape} en {pth}"
+                    f"{col} must be 2D (N,D). Found shape={arr.shape} in {pth}"
                 )
             if dim is None:
                 dim = arr.shape[1]
             if arr.shape[1] != dim:
                 raise ValueError(
-                    f"Dimensión inconsistente: esperado D={dim}, en {pth} es {arr.shape[1]}"
+                    f"Inconsistent dimension: expected D={dim}, in {pth} it is {arr.shape[1]}"
                 )
             Xs.append(arr)
             # mapeo filas
             n = arr.shape[0]
             mapping.extend((ci, r) for r in range(n))
         if dim is None:
-            raise ValueError("No se pudo inferir dimensión del embedding.")
+            raise ValueError("Could not infer the embedding dimension.")
         X = np.vstack(Xs) if Xs else np.zeros((0, dim), np.float32)
         M = np.asarray(mapping, dtype=np.int32).reshape(-1, 2)
         if metric == "cosine" and X.size:
@@ -118,7 +118,7 @@ def ann_build(
             norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-12
             X = X / norms
 
-        # Serializamos a bytes para escribir en el ZIP de forma atómica
+        # Serialize to bytes to write into the ZIP atomically
         b_vecs = io.BytesIO()
         np.save(b_vecs, X)
         b_vecs.seek(0)
@@ -142,7 +142,7 @@ def ann_build(
             VECS_PATH: b_vecs.read(),
             MAP_PATH: b_map.read(),
         }
-    # Reescritura atómica del ZIP con los nuevos artefactos
+    # Atomic ZIP rewrite with the new artifacts
     _rewrite_zip_with_replacements(path, replacements={}, additions=additions)
     return meta
 
@@ -157,10 +157,10 @@ def vsearch(
     metric_fallback: Optional[str] = None,
     oversample: int = 10,
 ) -> pd.DataFrame:
-    """Busca top-k por vector. Usa índice flat si existe y está permitido por as_of; si no, hace brute-force exacto."""
+    """Search top-k by vector. Uses the flat index if present and allowed by as_of; otherwise exact brute-force."""
     q = np.asarray(list(query_vec), dtype=np.float32)
     with zipfile.ZipFile(path, "r") as zf:
-        # ¿podemos usar índice?
+        # can we use an index?
         use_index = any(e.filename == META_PATH for e in zf.infolist()) and _load_snapshot_index_allow(zf, as_of)
         if use_index:
             with zf.open(META_PATH, "r") as f:
@@ -168,7 +168,7 @@ def vsearch(
             dim = int(meta["dim"])
             metric = meta["metric"]
             if q.shape[0] != dim:
-                raise ValueError(f"Dimensión del query {q.shape[0]} != {dim}")
+                raise ValueError(f"Query dimension {q.shape[0]} != {dim}")
             # cargamos arrays
             X = np.load(io.BytesIO(zf.read(VECS_PATH)))
             M = np.load(io.BytesIO(zf.read(MAP_PATH)))  # int32[:,2]
@@ -186,23 +186,23 @@ def vsearch(
                 idx = np.argpartition(d2, top)[:top]
                 idx = idx[np.argsort(d2[idx])]
             candidates = M[idx]  # (chunk_idx, row_idx)
-            # post-filtrado por WHERE y selección de columnas
-            # (para simplicidad, cargamos filas necesarias de cada chunk)
+            # post-filter by WHERE and column selection
+            # (for simplicity, load the needed rows from each chunk)
             chunks = meta["chunks"]
             rows = []
             for ci in np.unique(candidates[:, 0]):
                 ci = int(ci)
                 pth = chunks[ci]["path"]
                 with zf.open(pth, "r") as f:
-                    df = pd.read_parquet(f)  # pequeño -> simple
-                # columnas auxiliares
+                    df = pd.read_parquet(f)  # small -> simple
+                # auxiliary columns
                 df = df.copy()
                 df["__chunk_idx__"] = ci
                 rows.append(df)
             big = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
-            # --- BLOQUE NUEVO: evita SettingWithCopyWarning y ordena según ANN ---
-            # aseguramos tener el row_idx del Parquet para matchear con candidates
+            # --- NEW BLOCK: avoids SettingWithCopyWarning and orders by ANN ---
+            # ensure we have the Parquet row_idx to match against candidates
             big = big.reset_index().rename(columns={"index": "__row_idx__"}).copy()
 
             if where:
@@ -211,16 +211,16 @@ def vsearch(
                 except Exception:
                     pass
 
-            # armamos claves (chunk_idx, row_idx) -> orden y (opcional) score
+            # build keys (chunk_idx, row_idx) -> order and (optional) score
             pairs = list(zip(candidates[:, 0].tolist(), candidates[:, 1].tolist()))
             order_key = {pair: i for i, pair in enumerate(pairs)}
 
-            # si querés también exponer el score en modo índice:
+            # if you also want to expose the score in index mode:
             if meta["metric"] == "cosine":
-                # reutilizamos 'scores' calculados más arriba
+                # reuse the 'scores' computed above
                 score_key = {pair: float(scores[i]) for pair, i in zip(pairs, idx)}
             else:
-                # en L2 usamos distancia positiva; convertimos a similitud negativa para ordenar
+                # in L2 we use positive distance; convert to negative similarity for ordering
                 score_key = {pair: float(-d2[i]) for pair, i in zip(pairs, idx)}
 
             # asignaciones seguras (sin warning)
@@ -237,19 +237,19 @@ def vsearch(
                 axis=1,
             )
 
-            # top-k por orden del ANN
+            # top-k by ANN order
             big = big.nsmallest(k, "__ord__")
 
             keep = list(columns) if columns else [
                 c for c in big.columns if not c.startswith("__")
             ]
-            # devolvemos también el score cuando existe
+            # also return the score when present
             if "__score__" in big.columns:
                 keep = keep + ["__score__"]
 
             return big[keep]
         else:
-            # brute force exacto: escaneamos embedding en los chunks y devolvemos top-k
+            # exact brute force: scan the embedding across chunks and return top-k
             chunks = _list_chunks(zf)
             all_rows = []
             col = "embedding"

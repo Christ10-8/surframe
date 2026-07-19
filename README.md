@@ -4,7 +4,10 @@
 
 ```
 pip install surframe
+surx demo          # the whole story in 15 seconds: sign → verify → poison → catch
 ```
+
+![SURFRAME demo: sign a dataset, flip one byte, verification names the exact file](https://raw.githubusercontent.com/Christ10-8/surframe/main/docs/demo.png)
 
 [![CI](https://github.com/Christ10-8/surframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Christ10-8/surframe/actions)
 [![PyPI](https://img.shields.io/pypi/v/surframe.svg)](https://pypi.org/project/surframe/)
@@ -20,8 +23,21 @@ SURFRAME is a single-file container (`.surx`) that fixes this:
 - **Column-level AES-GCM encryption** — ship PII columns encrypted; recipients query everything else without the passphrase. Sidecars are cryptographically bound to their container (no splicing between files).
 - **Append-only audit chain** — every read/write logged inside the container, hash-chained, and *anchored under the signature*: an attacker who rewrites the whole chain still gets caught.
 - **Queryable without unpacking** — Parquet chunks + bloom/minmax indexes inside a zip. `read(where=...)` prunes chunks before touching data.
+- **Offline, third-party verification** — one open-source command, exit codes. No account, no server, no vendor lock-in.
 
 Think *cosign for datasets*, in one `pip install`.
+
+## EU AI Act: evidence, not documentation
+
+The AI Act asks high-risk systems to document data governance (Art. 10), keep technical documentation (Art. 11) and traceable records (Art. 12). A README or a warehouse export is *documentation* — editable, and only as trustworthy as the system it came from. SURFRAME produces **evidence**: a signed pack an auditor can verify offline, without trusting you.
+
+```bash
+surx export trainset.surx --format ai-act
+```
+
+...emits an evidence pack (`EVIDENCE.json`, `REPORT.md`, an explicit map onto Art. 10/11/12, the audit chain, checksums) and **refuses to generate it for a tampered or corrupt container**. It attests integrity and traceability — not conformity.
+
+→ Full write-up: **[surframe.dev/blog/ai-act-evidence](https://surframe.dev/blog/ai-act-evidence)** · the deadline landscape post-Omnibus: **[surframe.dev/ai-act](https://surframe.dev/ai-act)**
 
 ## 60-second demo: catch a tampered dataset
 
@@ -43,7 +59,7 @@ assert report["valid"]                      # ✓ authentic, untouched
 
 # 3. Someone flips one byte in one chunk...
 report = surframe.verify_container("trainset.surx", kp.public_hex)
-print(report["reason"])    # "tampering detectado: 1 entrada(s) modificada(s)"
+print(report["reason"])    # "tampering detected: 1 modified entry"
 print(report["modified"])  # ["chunks/part-000000.parquet"]  ← the exact file
 ```
 
@@ -55,7 +71,7 @@ surx sign trainset.surx --key surx_signing.key --signer data-team
 surx verify trainset.surx --pubkey surx_signing.pub   # exit 0 = intact, 1 = tampered
 ```
 
-Run the full story: `python examples/provenance_demo.py`
+Run the full story: `surx demo`
 
 ## What's inside a .surx
 
@@ -65,31 +81,21 @@ Partitioning is optional and generic: `surframe.write(df, path, partition_by=["m
 
 ## CLI
 
-`write · read · plan · inspect · validate · optimize · snapshot · log · encrypt · decrypt · keygen · sign · verify · audit-verify`
+`write · read · plan · inspect · validate · optimize · snapshot · log · encrypt · decrypt · keygen · sign · verify · audit-verify · export · seal · check-seal`
 
-`verify` and `audit-verify` return exit code 0/1, so a dataset check is one line in any pipeline. A ready-made GitHub Action lives in [`surx-verify-action/`](surx-verify-action/).
+`verify`, `audit-verify` and `export` return exit code 0/1, so a dataset check is one line in any pipeline. A ready-made GitHub Action lives in [`surx-verify-action/`](surx-verify-action/).
 
 ## Performance
 
-Measured on a 62 MB container (1.5M rows, incompressible data): `verify` in 0.32 s (~195 MB/s — 
-effectively SHA-256 + zip read speed), `sign` in 2.5 s (it atomically rewrites the container to 
-embed the signature). Try it yourself: `surx demo` runs the full sign→tamper→catch story in seconds.
+Measured on a 62 MB container (1.5M rows, incompressible data): `verify` in 0.32 s (~195 MB/s — effectively SHA-256 + zip read speed), `sign` in 2.5 s (it atomically rewrites the container to embed the signature). Try it yourself: `surx demo` runs the full sign→tamper→catch story in seconds.
 
 ## Security, honestly
 
-Read [THREAT_MODEL.md](THREAT_MODEL.md) before trusting this with anything serious. Short version: signatures prove integrity and authorship *relative to a public key you trust*; a self-attested container proves consistency, not identity. Key compromise, availability and side channels are out of scope. Version 0.2.0 exists because we audited 0.1.5 and found it didn't deliver what it promised — the [CHANGELOG](CHANGELOG_0.2.0.md) documents every hole and its fix, and `tests/test_v020.py` (38 checks) attacks each one, including a full audit-chain-rewrite attack that the unkeyed chain misses and the signature catches.
-
-## Badge your datasets
-
-Every seal gets a live badge — green while the published root stays verified in the log:
-
-```markdown
-[![surx seal](https://YOUR-REGISTRY/badge/sf-00001042-ab12cd34.svg)](https://YOUR-REGISTRY/s/sf-00001042-ab12cd34)
-```
+Read [THREAT_MODEL.md](THREAT_MODEL.md) before trusting this with anything serious. Short version: signatures prove integrity and authorship *relative to a public key you trust*; a self-attested container proves consistency, not identity. Key compromise, availability and side channels are out of scope. Version 0.3.x exists because we audited 0.1.5, found it didn't deliver what it promised, and rebuilt it — the [CHANGELOG](CHANGELOG_0.2.0.md) documents every hole and its fix, and `tests/test_v020.py` (42 checks) attacks each one, including a full audit-chain-rewrite attack that the unkeyed chain misses and the signature catches.
 
 ## Roadmap
 
-- **Hosted transparency log** (a Rekor-style public registry for dataset signatures: notarized seals, RFC 3161 timestamps, third-party verification pages). Open an issue tagged `registry-early-access` if you want in.
+- **Hosted transparency log** — a Rekor-style public registry for dataset signatures: notarized seals, third-party verification pages, anti-rollback checkpoints. Open an issue tagged `registry-early-access` if you want in.
 - Streaming/append writes, row-group chunking for large partitions.
 - Keyless signing via OIDC (Sigstore-style) — exploring.
 

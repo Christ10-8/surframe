@@ -1,9 +1,9 @@
-﻿"""
-SURFRAME PRO – Licencia (stub seguro para CI/MVP)
-- Nunca lanza excepción al importar.
-- Si no hay licencia: PRO deshabilitado (is_pro_enabled -> False).
-- Opt-in por env: SURFRAME_LICENSE_JSON o SURFRAME_LICENSE_PATH.
-- Bypass total (por CI/docs): SURFRAME_DISABLE_PRO=1 → siempre False.
+"""
+SURFRAME PRO - License (safe stub for CI/MVP)
+- Never raises on import.
+- If there is no license: PRO disabled (is_pro_enabled -> False).
+- Opt-in via env: SURFRAME_LICENSE_JSON or SURFRAME_LICENSE_PATH.
+- Full bypass (for CI/docs): SURFRAME_DISABLE_PRO=1 -> always False.
 """
 from __future__ import annotations
 import json, os, hashlib
@@ -37,7 +37,7 @@ def load_license() -> LicenseStatus:
     if not data:
         return LicenseStatus(False, "missing", set())
     features = set(data.get("features", []))
-    # MVP: no validamos firma; solo formato-presencia
+    # MVP: we do not validate the signature; only format/presence
     return LicenseStatus(True, "ok", features)
 
 def is_pro_enabled(feature: Optional[str] = None) -> bool:

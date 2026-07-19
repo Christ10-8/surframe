@@ -1,12 +1,12 @@
 # Copyright 2025 Christ10-8 — Apache-2.0
-"""Cliente del SURX Registry (transparency log). Nuevo en 0.3.0.
+"""SURX Registry client (transparency log). New in 0.3.0.
 
 seal_with_registry(): pide un sello notarizado sobre el estado actual del
-contenedor y guarda el recibo adentro (signatures/registry_seal.json, zona
+container and stores the receipt inside (signatures/registry_seal.json, a region
 excluida del digest firmado, asi el sello no invalida la firma local).
 
-verify_registry_seal(): NO confia en el recibo — recomputa el entries_root
-local, trae el sello del registro, y verifica la firma Ed25519 del emisor
+verify_registry_seal(): does NOT trust the receipt — recomputes the entries_root
+locally, fetches the seal from the registry, and verifies the issuer Ed25519 signature
 sobre el payload completo. Solo stdlib (urllib): cero dependencias nuevas.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _canonical(obj: Any) -> bytes:
 
 def seal_with_registry(path: str, api_key: str, *,
                        registry_url: str = DEFAULT_REGISTRY) -> Dict[str, Any]:
-    """Sella el contenedor en el registro y guarda el recibo adentro."""
+    """Seal the container in the registry and store the receipt inside."""
     with ZipFile(path, "r") as zf:
         eh = _entry_hashes(zf)
         root = _entries_root(eh)
@@ -75,16 +75,16 @@ def seal_with_registry(path: str, api_key: str, *,
 
 def verify_registry_seal(path: str, *, registry_url: Optional[str] = None,
                          registry_pubkey_hex: Optional[str] = None) -> Dict[str, Any]:
-    """Verifica el sello contra el registro. valid=True si:
-    (1) el entries_root local coincide con el sellado,
-    (2) la firma Ed25519 del emisor valida el payload completo,
-    (3) la clave del emisor coincide con la publicada por el registro
-        (o con registry_pubkey_hex si se fija por pinning)."""
+    """Verify the seal against the registry. valid=True if:
+    (1) the local entries_root matches the sealed one,
+    (2) the issuer Ed25519 signature validates the full payload,
+    (3) the issuer key matches the one published by the registry
+        (or with registry_pubkey_hex if pinned)."""
     report: Dict[str, Any] = {"valid": False, "reason": None, "seal_id": None,
                               "position": None, "verify_url": None}
     with ZipFile(path, "r") as zf:
         if RECEIPT_PATH not in zf.namelist():
-            report["reason"] = "sin recibo: el contenedor no fue sellado en un registro"
+            report["reason"] = "no receipt: the container was not sealed in a registry"
             return report
         receipt = json.loads(zf.read(RECEIPT_PATH))
         local_root = _entries_root(_entry_hashes(zf))
@@ -95,21 +95,21 @@ def verify_registry_seal(path: str, *, registry_url: Optional[str] = None,
                   verify_url=receipt.get("verify_url"))
 
     if seal["container"]["entries_root"] != local_root:
-        report["reason"] = ("el contenido actual NO es el sellado: entries_root local "
-                            f"{local_root[:12]}… != sellado {seal['container']['entries_root'][:12]}…")
+        report["reason"] = ("current content is NOT the sealed one: local entries_root "
+                            f"{local_root[:12]}… != sealed {seal['container']['entries_root'][:12]}…")
         return report
 
-    # Traer el sello del registro (no confiar solo en el recibo local)
+    # Fetch the seal from the registry (do not trust only the local receipt)
     remote = _http_json(f"{url}/api/v1/seals/{seal['seal_id']}")
     pub_hex = registry_pubkey_hex or _http_json(f"{url}/api/v1/pubkey")["registry_pubkey"]
     if remote["seal"].get("registry_pubkey") != pub_hex:
-        report["reason"] = "la clave del emisor en el sello no coincide con la del registro"
+        report["reason"] = "the issuer key in the seal does not match the registry's"
         return report
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex)).verify(
             bytes.fromhex(remote["signature"]), _canonical(remote["seal"]))
     except (InvalidSignature, ValueError):
-        report["reason"] = "firma del registro invalida"
+        report["reason"] = "invalid registry signature"
         return report
     if remote["seal"]["container"]["entries_root"] != local_root:
         report["reason"] = "el sello remoto no corresponde a este contenido"

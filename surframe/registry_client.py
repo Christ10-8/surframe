@@ -1,16 +1,16 @@
 # Copyright 2025 Christ10-8 — Apache-2.0
-"""Cliente del SURX Registry (nuevo en 0.3.0). Solo stdlib: cero deps nuevas.
+"""SURX Registry client (new in 0.3.0). Stdlib only: zero new deps.
 
-seal_container_remote(): toma un contenedor YA firmado localmente y lo notariza
-en el transparency log — el sello del registro prueba ante terceros que ESTE
-estado existio y quedo anclado publicamente. El recibo se guarda dentro del
-contenedor (signatures/registry_seal.json, zona excluida del digest local, asi
-que la firma local sigue valida).
+seal_container_remote(): takes a container ALREADY signed locally and notarizes
+it in the transparency log — the registry seal proves to third parties that THIS
+state existed and was publicly anchored. The receipt is stored inside the
+container (signatures/registry_seal.json, a region excluded from the local
+digest, so the local signature stays valid).
 
 check_seal(): triple verificacion —
-  1. local:   el contenido ACTUAL coincide con el entries_root sellado
-  2. offline: la firma Ed25519 del emisor sobre el payload del sello
-  3. online:  el registro confirma el sello y su eslabon en la cadena
+  1. local:   the CURRENT content matches the sealed entries_root
+  2. offline: the issuer Ed25519 signature over the seal payload
+  3. online:  the registry confirms the seal and its link in the chain
 Funciona sin red (informa registry="unreachable" y valida 1+2 igual).
 """
 from __future__ import annotations
@@ -43,11 +43,11 @@ def _get(url: str) -> dict:
 
 def seal_container_remote(path: str, api_key: str,
                           registry_url: str = "") -> Dict[str, Any]:
-    """Notariza un contenedor firmado. Requiere sign_container() previo."""
+    """Notarize a signed container. Requires a prior sign_container()."""
     base = (registry_url or DEFAULT_REGISTRY).rstrip("/")
     with ZipFile(path, "r") as zf:
         if SIG_PATH not in zf.namelist():
-            raise ValueError("El contenedor no esta firmado. Corre sign_container()/surx sign primero.")
+            raise ValueError("The container is not signed. Run sign_container()/surx sign first.")
         sig_doc = json.loads(zf.read(SIG_PATH))
     p = sig_doc["payload"]
     receipt = _post(f"{base}/v1/seal",
@@ -67,11 +67,11 @@ def seal_container_remote(path: str, api_key: str,
 
 
 def check_seal(path: str, registry_url: str = "") -> Dict[str, Any]:
-    """Verifica el sello: contenido actual vs sellado, firma del emisor, y registro."""
+    """Verify the seal: current content vs sealed, issuer signature, and registry."""
     with ZipFile(path, "r") as zf:
         if RECEIPT_PATH not in zf.namelist():
             return {"sealed": False, "valid": False,
-                    "reason": "sin recibo: el contenedor no fue sellado en el registro"}
+                    "reason": "no receipt: the container was not sealed in the registry"}
         receipt = json.loads(zf.read(RECEIPT_PATH))
         current_root = _entries_root(_entry_hashes(zf))
 
@@ -100,9 +100,9 @@ def check_seal(path: str, registry_url: str = "") -> Dict[str, Any]:
 
     valid = local_match and issuer_ok and registry_state != "INVALID"
     reason = "ok" if valid else "; ".join(
-        ([] if local_match else ["el contenido actual NO coincide con el estado sellado"])
-        + ([] if issuer_ok else ["firma del emisor invalida"])
-        + ([] if registry_state != "INVALID" else ["el registro reporta el sello como invalido"]))
+        ([] if local_match else ["current content does NOT match the sealed state"])
+        + ([] if issuer_ok else ["invalid issuer signature"])
+        + ([] if registry_state != "INVALID" else ["the registry reports the seal as invalid"]))
     return {"sealed": True, "valid": valid, "reason": reason,
             "seal_id": receipt["seal_id"], "n": receipt.get("n"),
             "local_match": local_match, "issuer_sig_ok": issuer_ok,

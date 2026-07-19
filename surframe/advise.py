@@ -101,7 +101,7 @@ def advise(path: str) -> Dict[str, Any]:
                 denom = min(10.0, max(1.5, math.sqrt(float(d))))
                 est["partitions"] = max(0.0, 1.0 - (1.0 / denom))
             if order_col:
-                est["ordering"] = 0.3  # heurística conservadora
+                est["ordering"] = 0.3  # conservative heuristic
 
         rec_indexes = {
             "bloom": bloom_candidates[:5],

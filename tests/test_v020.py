@@ -83,7 +83,7 @@ check("tamper detectado", not rep["valid"])
 check("entrada exacta reportada", chunk in rep["modified"], str(rep["modified"]))
 kp2 = generate_keypair()
 rep = verify_container(p, kp2.public_hex)
-check("clave publica ajena -> firma invalida", not rep["valid"] and "firma invalida" in rep["reason"])
+check("clave publica ajena -> firma invalida", not rep["valid"] and "invalid signature" in rep["reason"])
 
 print("\n== T4: cadena de auditoria - verificador nuevo ==")
 p = fresh("t4")
@@ -278,7 +278,7 @@ with _z.ZipFile(buf, "a") as z:   # duplicar manifest con contenido distinto
 open(p, "wb").write(buf.getvalue())
 rep = verify_container(p, kp.public_hex)
 check("verify rechaza entrada duplicada", not rep["valid"]
-      and "duplicada" in (rep["reason"] or ""), rep["reason"])
+      and "duplicate" in (rep["reason"] or ""), rep["reason"])
 try:
     sign_container(p, kp.private_hex)
     check("sign se niega sobre zip ambiguo", False)

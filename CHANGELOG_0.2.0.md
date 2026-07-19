@@ -1,3 +1,14 @@
+# SURFRAME 0.3.2
+
+- **CLI and error messages are now in English.** `surx demo`, `surx verify`, `sign`,
+  `keygen`, all `--help` texts, and the `reason` strings from `verify_container`
+  (e.g. "tampering detected: 1 modified entry", "invalid signature", "unsafe zip
+  structure") were previously Spanish; they're now English, matching the docs,
+  site and target audience. No API changes. Tests updated to the new strings
+  (42 + 19, all green).
+- Grammatical pluralization in tamper reports ("1 modified entry" / "3 modified
+  entries").
+
 # SURFRAME 0.3.1
 
 - **`surx export --format ai-act`** (nuevo): genera un *evidence pack* verificable

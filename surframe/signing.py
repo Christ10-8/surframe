@@ -2,27 +2,27 @@
 # Licensed under the Apache License, Version 2.0
 # -*- coding: utf-8 -*-
 """
-Firma Ed25519 de contenedores SURX (nuevo en 0.2.0).
+Ed25519 signing for SURX containers (new in 0.2.0).
 
-Que firma:
-- Un digest deterministico (Merkle-plano SHA-256) sobre TODAS las entradas del
-  zip, ordenadas, EXCEPTO regiones mutables:
-    * signatures/        (la firma no se firma a si misma)
-    * profiles/audit/    (append-only: se ancla via chain-heads, no via digest)
-    * profiles/usage*    (KPIs que mutan en cada lectura)
-- Los chain-heads del log de auditoria AL MOMENTO de firmar. verify() valida
-  que la cadena actual sea consistente y que el head firmado sea un ANCESTRO
-  de la cadena actual: la auditoria solo pudo crecer, nunca editarse.
+What it signs:
+- A deterministic digest (flat Merkle SHA-256) over ALL zip entries, sorted,
+  EXCEPT mutable regions:
+    * signatures/        (the signature does not sign itself)
+    * profiles/audit/    (append-only: anchored via chain-heads, not the digest)
+    * profiles/usage*    (KPIs that mutate on every read)
+- The audit-log chain-heads AT SIGNING TIME. verify() checks the current chain
+  is consistent and that the signed head is an ANCESTOR of the current chain:
+  the audit log could only grow, never be edited.
 
-Que garantiza verify_container():
-- valid=True  -> ninguna entrada firmada cambio, la firma corresponde a la
-                 clave publica dada, y la auditoria solo agrego eventos.
-- valid=False -> reporta exactamente QUE entradas cambiaron/faltan/sobran,
-                 o donde se rompio la cadena de auditoria.
+What verify_container() guarantees:
+- valid=True  -> no signed entry changed, the signature matches the given public
+                 key, and the audit log only appended events.
+- valid=False -> reports exactly WHICH entries changed/are missing/were added,
+                 or where the audit chain broke.
 
-La "firma" de 0.1.5 era un hash-chain sin clave: cualquiera con acceso de
-escritura podia reescribir la cadena completa. Ed25519 cierra eso: sin la
-clave privada no se puede producir una firma valida sobre contenido alterado.
+The 0.1.5 "signature" was an unkeyed hash-chain: anyone with write access could
+rewrite the whole chain. Ed25519 closes that: without the private key you cannot
+produce a valid signature over altered content.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def _is_signed_entry(name: str) -> bool:
     return True
 
 
-# -------------------- claves --------------------
+# -------------------- keys --------------------
 
 @dataclass
 class KeyPair:
@@ -88,7 +88,7 @@ def generate_keypair() -> KeyPair:
 
 
 def save_private_key(kp_or_hex, path: str, passphrase: Optional[str] = None) -> None:
-    """Guarda la clave privada en PEM (PKCS8). Con passphrase queda cifrada at-rest."""
+    """Save the private key as PEM (PKCS8). With a passphrase it is encrypted at rest."""
     priv_hex = kp_or_hex.private_hex if isinstance(kp_or_hex, KeyPair) else str(kp_or_hex)
     priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(priv_hex))
     enc = (serialization.BestAvailableEncryption(passphrase.encode())
@@ -107,7 +107,7 @@ def load_private_key(path: str, passphrase: Optional[str] = None) -> str:
         priv = serialization.load_pem_private_key(
             f.read(), password=passphrase.encode() if passphrase else None)
     if not isinstance(priv, Ed25519PrivateKey):
-        raise ValueError("La clave del PEM no es Ed25519.")
+        raise ValueError("The PEM key is not Ed25519.")
     raw = priv.private_bytes(serialization.Encoding.Raw,
                              serialization.PrivateFormat.Raw,
                              serialization.NoEncryption())
@@ -127,12 +127,12 @@ def load_public_key(path: str) -> str:
     with open(path, "rb") as f:
         pub = serialization.load_pem_public_key(f.read())
     if not isinstance(pub, Ed25519PublicKey):
-        raise ValueError("La clave del PEM no es Ed25519.")
+        raise ValueError("The PEM key is not Ed25519.")
     return pub.public_bytes(serialization.Encoding.Raw,
                             serialization.PublicFormat.Raw).hex()
 
 
-# -------------------- digest del contenedor --------------------
+# -------------------- container digest --------------------
 
 def _validate_zip_structure(names: List[str]) -> List[str]:
     """(0.3.0) Rechaza estructuras de zip ambiguas o peligrosas.
@@ -143,10 +143,10 @@ def _validate_zip_structure(names: List[str]) -> List[str]:
     from collections import Counter
     for name, c in Counter(names).items():
         if c > 1:
-            problems.append(f"entrada duplicada x{c}: {name}")
+            problems.append(f"duplicate entry x{c}: {name}")
     for name in names:
         if name.startswith("/") or "\\" in name or ".." in name.split("/"):
-            problems.append(f"nombre inseguro: {name}")
+            problems.append(f"unsafe name: {name}")
     return problems
 
 
@@ -166,7 +166,7 @@ def _entries_root(entry_hashes: Dict[str, str]) -> str:
     return h.hexdigest()
 
 
-# -------------------- cadena de auditoria: heads --------------------
+# -------------------- audit chain: heads --------------------
 
 def _audit_files(zf: ZipFile) -> List[str]:
     return sorted(n for n in zf.namelist()
@@ -174,7 +174,7 @@ def _audit_files(zf: ZipFile) -> List[str]:
 
 
 def _chain_walk(raw: bytes) -> Tuple[List[str], bool, Optional[int]]:
-    """Recorre un JSONL encadenado. Devuelve (hashes_de_linea, consistente, primera_linea_mala)."""
+    """Walk a hash-chained JSONL. Returns (line_hashes, consistent, first_bad_line)."""
     running_hashes: List[str] = []
     prev = GENESIS
     lines = [ln for ln in raw.split(b"\n") if ln.strip()]
@@ -207,10 +207,10 @@ def _audit_heads(zf: ZipFile) -> Dict[str, str]:
     return heads
 
 
-# -------------------- firmar / verificar --------------------
+# -------------------- sign / verify --------------------
 
 def sign_container(path: str, private_key_hex: str, *, signer: Optional[str] = None) -> Dict[str, Any]:
-    """Firma el contenedor y guarda signatures/ed25519.json adentro. Devuelve el payload firmado."""
+    """Sign the container and store signatures/ed25519.json inside. Returns the signed payload."""
     priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key_hex))
     pub_hex = priv.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
@@ -218,11 +218,11 @@ def sign_container(path: str, private_key_hex: str, *, signer: Optional[str] = N
     with ZipFile(path, "r") as zf:
         problems = _validate_zip_structure(zf.namelist())
         if problems:
-            raise ValueError("Estructura de zip insegura, no se firma: " + "; ".join(problems))
+            raise ValueError("Unsafe zip structure, refusing to sign: " + "; ".join(problems))
         eh = _entry_hashes(zf)
         heads = _audit_heads(zf)
         if any(v == "!inconsistent" for v in heads.values()):
-            raise ValueError("La cadena de auditoria ya es inconsistente: no se firma un estado corrupto.")
+            raise ValueError("The audit chain is already inconsistent: refusing to sign a corrupt state.")
 
     payload = {
         "v": 1,
@@ -252,26 +252,26 @@ def sign_container(path: str, private_key_hex: str, *, signer: Optional[str] = N
 
 
 def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[str, Any]:
-    """Verifica firma + integridad. Sin public_key_hex usa la embebida (self-attested)."""
+    """Verify signature + integrity. Without public_key_hex, uses the embedded one (self-attested)."""
     report: Dict[str, Any] = {
         "valid": False, "reason": None, "signer": None, "signed_at": None,
         "trusted_key": public_key_hex is not None,
         "modified": [], "missing": [], "added": [],
         "audit": {"consistent": None, "append_only": None, "detail": {}},
     }
-    # Un contenedor corrupto a nivel fisico (directorio central roto, stream
-    # deflate con un byte volteado, CRC malo, truncado) NO debe crashear con un
-    # traceback de zipfile/zlib: es simplemente otra forma de "invalido". Lo
-    # envolvemos y devolvemos un reporte limpio, igual que el resto de fallas.
+    # A physically corrupt container (broken central directory, deflate stream
+    # with a flipped byte, bad CRC, truncated) must NOT crash with a raw
+    # traceback from zipfile/zlib: it is just another form of "invalid". So
+    # we wrap it and return a clean report, like every other failure.
     try:
         with ZipFile(path, "r") as zf:
             names = zf.namelist()
             problems = _validate_zip_structure(names)
             if problems:
-                report["reason"] = "estructura de zip insegura: " + "; ".join(problems)
+                report["reason"] = "unsafe zip structure: " + "; ".join(problems)
                 return report
             if SIG_PATH not in names:
-                report["reason"] = "unsigned: no existe signatures/ed25519.json"
+                report["reason"] = "unsigned: missing signatures/ed25519.json"
                 return report
             doc = json.loads(zf.read(SIG_PATH))
             payload = doc.get("payload", {})
@@ -279,7 +279,7 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
             report["signer"] = payload.get("signer")
             report["signed_at"] = payload.get("signed_at")
 
-            # 1) firma criptografica sobre el payload
+            # 1) cryptographic signature over the payload
             pub_hex = public_key_hex or payload.get("public_key", "")
             try:
                 pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex))
@@ -287,11 +287,11 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
                                            separators=(",", ":")).encode("utf-8")
                 pub.verify(bytes.fromhex(sig_hex), payload_bytes)
             except (InvalidSignature, ValueError):
-                report["reason"] = ("firma invalida: el payload no corresponde a la clave "
-                                    + ("provista" if public_key_hex else "embebida"))
+                report["reason"] = ("invalid signature: payload does not match the "
+                                    + ("provided key" if public_key_hex else "embedded key"))
                 return report
 
-            # 2) diff de entradas firmadas vs estado actual
+            # 2) diff signed entries vs current state
             signed_entries: Dict[str, str] = payload.get("entries", {})
             current = _entry_hashes(zf)
             report["missing"] = sorted(set(signed_entries) - set(current))
@@ -304,7 +304,7 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
                           and not report["modified"]
                           and _entries_root(current) == payload.get("entries_root"))
 
-            # 3) auditoria: consistente Y append-only respecto del head firmado
+            # 3) audit: consistent AND append-only relative to the signed head
             signed_heads: Dict[str, str] = payload.get("audit_heads", {})
             audit_ok = True
             for fname in sorted(set(_audit_files(zf)) | set(signed_heads)):
@@ -338,14 +338,14 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
     if not report["valid"] and report["reason"] is None:
         parts = []
         if report["modified"]:
-            parts.append(f"{len(report['modified'])} entrada(s) modificada(s)")
+            parts.append(f"{len(report['modified'])} modified entr" + ("y" if len(report['modified'])==1 else "ies"))
         if report["missing"]:
-            parts.append(f"{len(report['missing'])} faltante(s)")
+            parts.append(f"{len(report['missing'])} missing entr" + ("y" if len(report['missing'])==1 else "ies"))
         if report["added"]:
-            parts.append(f"{len(report['added'])} agregada(s) sin firmar")
+            parts.append(f"{len(report['added'])} unsigned addition" + ("" if len(report['added'])==1 else "s"))
         if not audit_ok:
-            parts.append("auditoria alterada")
-        report["reason"] = "tampering detectado: " + ", ".join(parts)
+            parts.append("audit log altered")
+        report["reason"] = "tampering detected: " + ", ".join(parts)
     elif report["valid"]:
         report["reason"] = "ok"
     return report

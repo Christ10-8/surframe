@@ -51,7 +51,7 @@ import pyarrow as _pa
 import pyarrow.parquet as _pq
 import hashlib as _hashlib  # para _bloom_maybe
 
-# -------------------- helpers generales --------------------
+# -------------------- general helpers --------------------
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -102,7 +102,7 @@ def _read_json_from_zip(zf: ZipFile, path: str) -> Any:
         return json.loads(f.read().decode("utf-8"))
 
 def _fsync_file_and_dir(file_path: str) -> None:
-    """(0.2.0) Durabilidad: fsync del archivo y su directorio antes/despues del rename."""
+    """(0.2.0) Durability: fsync the file and its directory before/after the rename."""
     try:
         fd = os.open(file_path, os.O_RDONLY)
         try:
@@ -199,26 +199,26 @@ def write(
     fmt: str = "surx",
     auto_snapshot: bool = True,
 ) -> None:
-    """Convierte CSV/Parquet/DataFrame a contenedor .surx con índices básicos."""
+    """Convert CSV/Parquet/DataFrame into a .surx container with basic indexes."""
     if isinstance(source, str):
         if source.lower().endswith(".csv"):
             df = pd.read_csv(source)
         elif source.lower().endswith(".parquet"):
             df = pd.read_parquet(source)
         else:
-            raise ValueError("Fuente no soportada. Use CSV/Parquet/DataFrame.")
+            raise ValueError("Unsupported source. Use CSV/Parquet/DataFrame.")
     else:
         df = source.copy()
 
-    # (0.2.0) Particionado generico: partition_by[0] > 'country' si existe > sin particion.
+    # (0.2.0) Generic partitioning: partition_by[0] > 'country' if present > no partition.
     part_col: Optional[str] = None
     if partition_by:
         part_col = partition_by[0]
         if part_col not in df.columns:
-            raise ValueError(f"Columna de particion '{part_col}' no existe en los datos.")
+            raise ValueError(f"Partition column '{part_col}' does not exist in the data.")
     elif "country" in df.columns:
         part_col = "country"
-    # 'ts' es opcional: si existe, construimos minmax; si no, seguimos sin error.
+    # 'ts' is optional: if present we build minmax; otherwise continue without error.
     has_ts = "ts" in df.columns
     if has_ts:
         df["ts"] = _ensure_ts_utc_series(df["ts"])
@@ -226,7 +226,7 @@ def write(
     manifest = _infer_or_load_manifest_schema(schema, df)
     manifest["name"] = _basename_wo_ext(out_path)
 
-    # Índices por defecto sólo si indexes es None
+    # Default indexes only if indexes is None
     if indexes is None:
         idx_default: Dict[str, List[str]] = ({part_col: ["bloom"]} if part_col else {})
         if has_ts:
@@ -282,7 +282,7 @@ def write(
             part_counter += 1
 
         minmax_idx, bloom_idx = _build_indexes_entries(chunk_infos, blooms, bloom_col=part_col)
-        # Escribimos bloom siempre; minmax sólo si hay 'ts'
+        # Always write bloom; minmax only if 'ts' is present
         if has_ts and minmax_idx.get("entries"):
             _zip_write_json(zf, _posix_join("indexes", "ts.minmax.json"), minmax_idx)
         if part_col and bloom_idx.get("entries"):
@@ -298,14 +298,14 @@ def write(
         snapshot(out_path, note="auto after write")
 
 
-# -------------------- Cifrado de columnas (wrapper público) --------------------
+# -------------------- Column encryption (public wrapper) --------------------
 
 def encrypt(path: str, columns: Iterable[str], passphrase: str) -> None:
-    """Cifra columnas (side-cars AES-GCM) y reescribe los chunks sin esas columnas."""
+    """Encrypt columns (AES-GCM side-cars) and rewrite the chunks without those columns."""
     encrypt_columns_in_surx(path, columns, passphrase)
 
 
-# -------------------- Lectura con pruning --------------------
+# -------------------- Read with pruning --------------------
 
 # parser where: acepta = y ==
 _COND_RE = re.compile(
@@ -344,7 +344,7 @@ def _parse_where(where: Optional[str]) -> List[_Cond]:
     for seg in _split_and(where):
         m = _COND_RE.match(seg)
         if not m:
-            raise ValueError(f"Condición inválida: {seg}")
+            raise ValueError(f"Invalid condition: {seg}")
         col, op, val = m.group("col"), m.group("op"), m.group("val")
         if op == "=":
             op = "=="
@@ -364,7 +364,7 @@ def _load_index_minmax(zf: ZipFile, allowed_paths: Optional[set[str]] = None) ->
     return out
 
 def _load_index_bloom(zf: ZipFile, allowed_paths: Optional[set[str]] = None) -> Tuple[Optional[str], Dict[str, Tuple[Bloom, str]]]:
-    """(0.2.0) Columna de particion dinamica: busca indexes/<col>.bloom.json y devuelve (col, entradas)."""
+    """(0.2.0) Dynamic partition column: looks for indexes/<col>.bloom.json and returns (col, entries)."""
     cands = sorted(n for n in zf.namelist() if n.startswith("indexes/") and n.endswith(".bloom.json"))
     if not cands:
         return None, {}
@@ -497,7 +497,7 @@ def _pick_snapshot_as_of(zf: ZipFile, as_of_iso: str) -> Optional[Dict[str, Any]
     try:
         as_of = pd.to_datetime(as_of_iso, utc=True)
     except Exception:
-        raise ValueError(f"as_of inválido: {as_of_iso}")
+        raise ValueError(f"invalid as_of: {as_of_iso}")
     best = None
     for p in _list_snapshot_files(zf):
         s = _read_json_from_zip(zf, p)
@@ -534,7 +534,7 @@ def _journal_append(zip_path: str, op: str, details: Dict[str, Any]) -> None:
         pass
 
 
-# ------------- read (con soporte as_of y columnas cifradas) ----------------
+# ------------- read (with as_of and encrypted columns support) ----------------
 
 def read(
     path: str,
@@ -546,9 +546,9 @@ def read(
     explain: bool = False,
 ) -> pd.DataFrame:
     """
-    Lee .surx aplicando pruning por índices y proyección de columnas.
-    Si se pasa as_of, usa el snapshot más reciente <= as_of para resolver chunks/índices.
-    Si el contenedor tiene columnas cifradas y se solicitan en `columns`, debe proveerse `passphrase`.
+    Read .surx applying index pruning and column projection.
+    If as_of is passed, uses the most recent snapshot <= as_of to resolve chunks/indexes.
+    If the container has encrypted columns and they are requested in `columns`, `passphrase` must be provided.
     """
     conds = _parse_where(where)
     cols_req = list(columns) if columns is not None else None
@@ -566,13 +566,13 @@ def read(
         allowed_idx_paths = set(snap["indexes"]) if snap else None
         allowed_chunk_paths = [e["path"] for e in (snap.get("chunks") if snap else [])] if snap else None
 
-        # --- nombres en el zip (para detectar side-cars de cifrado robustamente) ---
+        # --- names in the zip (to robustly detect encryption side-cars) ---
         znames = set(zf.namelist())
 
-        # --- cifrado: validar si se pidieron columnas cifradas sin passphrase ---
+        # --- encryption: check if encrypted columns were requested without a passphrase ---
         meta = load_crypto_meta(zf)
 
-        # Detectar por meta y también por existencia de side-cars
+        # Detect via meta and also via the presence of side-cars
         enc_requested: set[str] = set()
         if cols_req is not None:
             for c in cols_req:
@@ -581,7 +581,7 @@ def read(
                     enc_requested.add(c)
 
         if ((meta and cols_req is not None and (set(cols_req) & set(meta.columns))) or enc_requested) and not passphrase:
-            raise ValueError("Se solicitaron columnas cifradas pero no se proporcionó passphrase")
+            raise ValueError("Encrypted columns were requested but no passphrase was provided")
 
         idx_minmax = _load_index_minmax(zf, allowed_paths=allowed_idx_paths)
         bloom_col, idx_bloom = _load_index_bloom(zf, allowed_paths=allowed_idx_paths)
@@ -638,7 +638,7 @@ def read(
         for cid, pth in chunk_paths:
             info = zf.getinfo(pth)
 
-            # --- Detectar columnas cifradas en este part (robusto aunque meta.parts esté vacío) ---
+            # --- Detect encrypted columns in this part (robust even if meta.parts is empty) ---
             m = re.search(r"part-(\d+)\.parquet$", pth)
             part_id = m.group(1) if m else pth
 
@@ -650,7 +650,7 @@ def read(
                     if f"enc/part-{part_id}/{c}.bin" in znames:
                         enc_cols_part.add(c)
 
-            # No pedir a Parquet las columnas cifradas
+            # Do not request the encrypted columns from Parquet
             cols_on_disk = None
             if cols_needed is not None:
                 tmp = [c for c in cols_needed if c not in enc_cols_part]
@@ -659,7 +659,7 @@ def read(
             with zf.open(pth, "r") as f:
                 df_chunk = pd.read_parquet(f, columns=cols_on_disk)
 
-            # Rehidratar lo cifrado si hay passphrase (usa side-cars; no depende de meta.parts)
+            # Rehydrate encrypted data if a passphrase is present (uses side-cars; independent of meta.parts)
             if passphrase:
                 df_chunk = rehydrate_chunk_columns(
                     zf, df_chunk, pth, passphrase=passphrase, want_cols=cols_needed
@@ -671,7 +671,7 @@ def read(
             if conds:
                 df_chunk = _rows_filter(df_chunk, conds)
 
-            # Completar columnas faltantes sólo si NO están cifradas. Si son cifradas: rehidratar o error claro.
+            # Fill missing columns only if NOT encrypted. If encrypted: rehydrate or raise a clear error.
             if cols_req is not None:
                 missing = [c for c in cols_req if c not in df_chunk.columns]
                 if missing:
@@ -688,7 +688,7 @@ def read(
                                 zf, df_chunk, pth, passphrase=passphrase, want_cols=still_missing
                             )
                         else:
-                            raise ValueError("Se solicitaron columnas cifradas pero no se proporcionó passphrase")
+                            raise ValueError("Encrypted columns were requested but no passphrase was provided")
                 df_chunk = df_chunk[cols_req]
             parts.append(df_chunk)
 
@@ -697,7 +697,7 @@ def read(
     if head is not None:
         out = out.head(head)
 
-    # Guardar métrica de uso (archivo por timestamp único)
+    # Save usage metric (one file per unique timestamp)
     try:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         usage_rec = {"ts": ts, "where": where, "columns": cols_req, "bytes_read": int(bytes_read), "chunks_scanned": int(chunks_scanned), "as_of": as_of}
@@ -723,7 +723,7 @@ def read(
     except Exception:
         pass
 
-    # ---- Auditoría de acceso (3.3) ----
+    # ---- Access audit (3.3) ----
     try:
         duration_ms = int((time.perf_counter() - t0) * 1000)
         cols_log = list(cols_req) if cols_req else None
@@ -741,9 +741,9 @@ def read(
         }
         if as_of:
             evt["as_of"] = as_of
-        append_audit_event(path, evt)  # firma opcional vía SURX_AUDIT_SIGN
+        append_audit_event(path, evt)  # optional signing via SURX_AUDIT_SIGN
     except Exception:
-        # Nunca romper la lectura por fallas de auditoría
+        # Never break the read because of audit failures
         pass
 
     return out
@@ -782,7 +782,7 @@ def inspect(path: str) -> Dict[str, Any]:
             except Exception:
                 pass
 
-        # snapshots/journal resumen
+        # snapshots/journal summary
         snaps = _list_snapshot_files(zf)
         last_snap = None
         if snaps:
@@ -921,14 +921,14 @@ def _normalize_scalar_for_kind(kind: str, v: Any) -> Any:
     return str(v)
 
 def validate(path: str) -> None:
-    """Valida constraints del manifest y genera profiles/quality.json con HLL + KLL-lite."""
+    """Validate manifest constraints and generate profiles/quality.json with HLL + KLL-lite."""
     violations: List[str] = []
     with ZipFile(path, mode="r") as zf:
         manifest = _read_json_from_zip(zf, "manifest.json")
         schema = manifest.get("schema", [])
         chunk_files = [n for n in zf.namelist() if n.startswith("chunks/") and n.endswith(".parquet")]
         if not chunk_files:
-            raise ValueError("No hay chunks en el contenedor.")
+            raise ValueError("The container has no chunks.")
 
         enum_allowed: Dict[str, set] = {}
         kind_by_col: Dict[str, str] = {}
@@ -1060,19 +1060,19 @@ def validate(path: str) -> None:
         if "min" in cons:
             cmin = _to_comparable(kind, cons["min"])
             if obs_min is not None and cmin is not None and obs_min < cmin:
-                violations.append(f"{col}: min observado {obs_min} < constraint {cmin}")
+                violations.append(f"{col}: observed min {obs_min} < constraint {cmin}")
         if "max" in cons:
             cmax = _to_comparable(kind, cons["max"])
             if obs_max is not None and cmax is not None and obs_max > cmax:
-                violations.append(f"{col}: max observado {obs_max} > constraint {cmax}")
+                violations.append(f"{col}: observed max {obs_max} > constraint {cmax}")
 
         if "valid_range" in cons and isinstance(cons["valid_range"], (list, tuple)) and len(cons["valid_range"]) == 2:
             lo = _to_comparable(kind, cons["valid_range"][0])
             hi = _to_comparable(kind, cons["valid_range"][1])
             if obs_min is not None and lo is not None and obs_min < lo:
-                violations.append(f"{col}: min observado {obs_min} < rango mínimo {lo}")
+                violations.append(f"{col}: observed min {obs_min} < min range {lo}")
             if obs_max is not None and hi is not None and obs_max > hi:
-                violations.append(f"{col}: max observado {obs_max} > rango máximo {hi}")
+                violations.append(f"{col}: observed max {obs_max} > max range {hi}")
 
     if violations:
         msg = "VALIDATION FAILED:\n- " + "\n- ".join(violations)
@@ -1082,11 +1082,11 @@ def validate(path: str) -> None:
     _journal_append(path, "validate", {})
 
 
-# (0.2.0) Se elimino un optimize() duplicado que quedaba tapado por el
+# (0.2.0) Removed a duplicate optimize() that was shadowed by the
 # optimize() completo definido mas abajo; la doble definicion era codigo muerto.
 
 
-# -------------------- Plan (explicación de pruning) --------------------
+# -------------------- Plan (pruning explanation) --------------------
 
 def _idx_summary_minmax(idx_minmax: Dict[str, Tuple[pd.Timestamp, pd.Timestamp, str]]) -> Dict[str, Any]:
     if not idx_minmax:
@@ -1114,7 +1114,7 @@ def _list_chunk_paths(zf: ZipFile) -> List[str]:
     return [n for n in zf.namelist() if n.startswith("chunks/") and n.endswith(".parquet")]
 
 def plan(path: str, where: Optional[str] = None, as_of: Optional[str] = None) -> Dict[str, Any]:
-    """Devuelve plan de pruning; respeta snapshot si se pasa as_of."""
+    """Return the pruning plan; respects the snapshot if as_of is passed."""
     with ZipFile(path, mode="r") as zf:
         conds = _parse_where(where)
         snap = _pick_snapshot_as_of(zf, as_of) if as_of else None
@@ -1172,7 +1172,7 @@ def plan(path: str, where: Optional[str] = None, as_of: Optional[str] = None) ->
                 "bloom": _idx_summary_bloom(idx_bloom),
             },
         }
-        # --- Compatibilidad con versión vieja:
+        # --- Backwards compatibility with the old version:
         plan_info["candidates"] = cand_paths
         plan_info["count"] = len(cand_paths)
 
@@ -1195,7 +1195,7 @@ def _to_json_scalar(v: Any) -> Any:
     return str(v)
 
 def reindex(path: str, indexes: Dict[str, Dict[str, Any]]) -> None:
-    """Reconstruye índices solicitados sin reescribir los chunks."""
+    """Rebuild requested indexes without rewriting the chunks."""
     to_write: Dict[str, Any] = {}
 
     with ZipFile(path, mode="r") as zf:
@@ -1307,9 +1307,9 @@ def _update_usage_agg(path: str) -> None:
 def update_usage_kpis(path: str, window: int | None = None, baseline: bool = False) -> dict:
     """
     Calcula KPIs agregados de uso y los persiste de forma estable.
-    - Si baseline=True → guarda en profiles/usage/pre_kpis.json
-    - Si baseline=False → guarda en profiles/usage/post_kpis.json y computa delta_vs_pre
-    - También mantiene un resumen combinado en profiles/usage.json para consumo rápido.
+    - If baseline=True -> saves to profiles/usage/pre_kpis.json
+    - If baseline=False -> saves to profiles/usage/post_kpis.json and computes delta_vs_pre
+    - Also keeps a combined summary in profiles/usage.json for quick consumption.
     """
     import json as _json
     import zipfile as _zip
@@ -1355,7 +1355,7 @@ def update_usage_kpis(path: str, window: int | None = None, baseline: bool = Fal
             "chunks_p95": _pct(chunks_vals, 95),
         }
 
-        # Leer pre/post existentes para armar el SUMMARY
+        # Read existing pre/post to build the SUMMARY
         try:
             pre_old = _json.loads(zf.read(BASE)) if BASE in zf.namelist() else None
         except Exception:
@@ -1365,8 +1365,8 @@ def update_usage_kpis(path: str, window: int | None = None, baseline: bool = Fal
         except Exception:
             post_old = None
 
-    # --- Persistencia (escritura atómica usando helper local) ---
-    to_delete = [SUMMARY]  # siempre recalculamos el resumen
+    # --- Persistence (atomic write using local helper) ---
+    to_delete = [SUMMARY]  # always recompute the summary
     to_add = {}
 
     saved = None
@@ -1407,7 +1407,7 @@ def update_usage_kpis(path: str, window: int | None = None, baseline: bool = Fal
     return {"saved": saved, "pre_kpis": merged.get("pre_kpis"), "post_kpis": merged.get("post_kpis"),
             "delta_vs_pre": merged.get("delta_vs_pre")}
 
-# -------------------- surx advise (estimación conservadora) --------------------
+# -------------------- surx advise (conservative estimate) --------------------
 
 def advise(path: str) -> dict:
     import json as _json, zipfile as _zip
@@ -1418,7 +1418,7 @@ def advise(path: str) -> dict:
     bytes_p50 = ((agg.get("post_kpis") or {}).get("bytes_p50")
                  or (agg.get("pre_kpis") or {}).get("bytes_p50")
                  or (agg.get("bytes_p50")))
-    # Heurística de selectividad por rango (muy simple)
+    # Range-selectivity heuristic (very simple)
     rng_cols = sorted((agg.get("columns_range") or {}).items(), key=lambda x: x[1], reverse=True)
     eq_cols  = sorted((agg.get("columns_eq") or {}).items(),    key=lambda x: x[1], reverse=True)
 
@@ -1429,7 +1429,7 @@ def advise(path: str) -> dict:
 
     est = {}
     if bytes_p50:
-        # si hay columna de orden sugerida, asumimos 30–50% de ahorro
+        # if there is a suggested order column, assume 30-50% savings
         est["bytes_p50_after"] = int(bytes_p50 * (0.6 if order else 0.8))
         est["ordering_gain"] = (bytes_p50 - est["bytes_p50_after"])
 
@@ -1449,10 +1449,10 @@ def _safe_json(zf, name):
     except Exception:
         return {}
 
-# -------------------- Snapshots & Journal (público) --------------------
+# -------------------- Snapshots & Journal (public) --------------------
 
 def snapshot(path: str, note: Optional[str] = None) -> Dict[str, Any]:
-    """Crea un snapshot de estado y lo guarda en snapshots/<ts>.json. Devuelve el objeto snapshot."""
+    """Create a state snapshot and save it to snapshots/<ts>.json. Return the snapshot object."""
     with ZipFile(path, "r") as zf:
         chunks = [n for n in zf.namelist() if n.startswith("chunks/") and n.endswith(".parquet")]
         idxs = [n for n in zf.namelist() if n.startswith("indexes/") and n.endswith(".json")]
@@ -1479,14 +1479,14 @@ def snapshot(path: str, note: Optional[str] = None) -> Dict[str, Any]:
     return snap
 
 def log(path: str) -> List[Dict[str, Any]]:
-    """Devuelve la lista de eventos del journal ordenados por id ascendente."""
+    """Return the journal events ordered by ascending id."""
     with ZipFile(path, "r") as zf:
         files = [n for n in zf.namelist() if n.startswith("journal/") and n.endswith(".json")]
         files.sort()
         return [_read_json_from_zip(zf, n) for n in files]
 
 def list_snapshots(path: str) -> List[Dict[str, Any]]:
-    """Lista todos los snapshots con metadatos mínimos (ordenados por ts asc)."""
+    """List all snapshots with minimal metadata (ordered by ascending ts)."""
     out: List[Dict[str, Any]] = []
     with ZipFile(path, mode="r") as zf:
         files = _list_snapshot_files(zf)
@@ -1512,7 +1512,7 @@ def resolve_as_of(path: str, as_of_token: Optional[str]) -> Optional[str]:
     """
     Normaliza el token `as_of`:
       - None -> None
-      - "latest" -> ts del snapshot más reciente
+      - "latest" -> ts of the most recent snapshot
       - "snapshots/<archivo>.json" -> ts del snapshot indicado (si existe)
       - ISO8601
     """
@@ -1532,29 +1532,29 @@ def resolve_as_of(path: str, as_of_token: Optional[str]) -> Optional[str]:
 
 def get_snapshot(path: str, as_of: Optional[str] = None) -> Dict[str, Any]:
     """
-    Devuelve el snapshot a usar para `as_of`.
-    - as_of=None  -> snapshot más reciente (si existe)
-    - as_of=ISO   -> snapshot más reciente <= as_of
-    - as_of="latest" o "snapshots/....json" -> resueltos automáticamente
+    Return the snapshot to use for `as_of`.
+    - as_of=None  -> most recent snapshot (if any)
+    - as_of=ISO   -> most recent snapshot <= as_of
+    - as_of="latest" or "snapshots/....json" -> resolved automatically
     """
     with ZipFile(path, "r") as zf:
         if as_of is None or as_of.lower() == "latest":
             s = _latest_snapshot(zf)
             if not s:
-                raise ValueError("No hay snapshots en el contenedor.")
+                raise ValueError("The container has no snapshots.")
             return s
         if as_of.startswith("snapshots/") and as_of.endswith(".json"):
             if as_of not in zf.namelist():
-                raise ValueError(f"No existe {as_of} en el contenedor.")
+                raise ValueError(f"{as_of} does not exist in the container.")
             return _read_json_from_zip(zf, as_of)
         s = _pick_snapshot_as_of(zf, as_of)
         if not s:
-            raise ValueError(f"No hay snapshot <= {as_of}.")
+            raise ValueError(f"No snapshot <= {as_of}.")
         return s
 
 
 # === Nivel 4: Optimize (compact + order) y Planner PLUS =====================
-# Utilidad: listar Parquet dentro de /chunks
+# Utility: list Parquet files inside /chunks
 
 def _list_parquet_chunks(zf: _zip.ZipFile) -> list[str]:
     out = []
@@ -1624,7 +1624,7 @@ def _has_crypto(zf: _zip.ZipFile) -> bool:
     
 
 def _zip_replace_entries(zip_path: str, to_delete: list[str], to_add: dict[str, bytes]) -> None:
-    """Reescribe el ZIP copiando todo menos 'to_delete' y agregando 'to_add'."""
+    """Rewrite the ZIP copying everything except 'to_delete' and adding 'to_add'."""
     import os, zipfile, tempfile
     tmp = zip_path + ".swap"
     dels = set(to_delete or [])
@@ -1648,21 +1648,21 @@ def optimize(path: str,
              order: list[str] | None = None,
              min_chunks: int = 1) -> dict:
     """
-    Recompone chunks: compactación y/o ordenación dentro del .surx.
-    - Reconstruye índices existentes (minmax/bloom)
+    Recompose chunks: compaction and/or ordering inside the .surx.
+    - Rebuilds existing indexes (minmax/bloom)
     - Escribe snapshot + journal
 
-    **Limitación MVP**: si hay columnas cifradas (config/crypto.json) se rechaza
-    la operación para no desincronizar side-cars.
+    **MVP limitation**: if there are encrypted columns (config/crypto.json) the
+    operation is rejected to avoid desyncing side-cars.
     """
     if not compact and not order:
-        raise ValueError("Nada para hacer: pasá --compact y/o --order")
+        raise ValueError("Nothing to do: pass --compact and/or --order")
 
-    # 1) Abrimos ZIP y medimos KPIs pre + cifrado
+    # 1) Open ZIP and measure pre-KPIs + encryption
     with _zip.ZipFile(path, "r") as zf:
         if _has_crypto(zf):
             raise ValueError(
-                "Dataset con columnas cifradas (config/crypto.json). "
+                "Dataset with encrypted columns (config/crypto.json). "
                 "Por seguridad, optimize() se bloquea en este MVP."
             )
         pre_kpis = _usage_kpis_aggregate(zf)
@@ -1670,16 +1670,16 @@ def optimize(path: str,
         if not chunk_paths:
             return {"changed": False, "reason": "no_chunks"}
 
-        # Validar columnas de orden contra un sample
+        # Validate order columns against a sample
         if order:
             sample = chunk_paths[0]
             with zf.open(sample) as f:
                 cols = _pq.read_table(f).column_names
             for c in order:
                 if c not in cols:
-                    raise ValueError(f"Columna de orden no existe en chunks: {c}")
+                    raise ValueError(f"Order column does not exist in chunks: {c}")
 
-    # 2) Particionado por partición (preserva subcarpetas, e.g., chunks/country=AR/)
+    # 2) Partition-wise (preserves subfolders, e.g., chunks/country=AR/)
     new_parts: list[tuple[str, bytes]] = []
 
     def _part_prefix(p: str) -> str:
@@ -1692,10 +1692,10 @@ def optimize(path: str,
     for p_old in chunk_paths:
         groups.setdefault(_part_prefix(p_old), []).append(p_old)
 
-    # --- contador global de IDs para evitar colisiones entre particiones
+    # --- global ID counter to avoid collisions between partitions
     next_id = 0
 
-    # Procesamos cada grupo de partición de forma independiente
+    # Process each partition group independently
     for prefix, paths in sorted(groups.items()):
         dfs = []
         with _zip.ZipFile(path, "r") as zf_local:
@@ -1711,10 +1711,10 @@ def optimize(path: str,
         if n == 0:
             continue
 
-        # decidir # de partes del grupo
+        # decide the number of parts in the group
         if compact:
             if target_rows <= 0:
-                raise ValueError("target_rows debe ser > 0")
+                raise ValueError("target_rows must be > 0")
             n_parts = max(min_chunks, _math.ceil(n / target_rows))
         else:
             n_parts = len(paths)
@@ -1727,20 +1727,20 @@ def optimize(path: str,
             new_parts.append((out_name, buf))
             next_id += 1
 
-    # Detectar índices existentes ANTES de reescribir (para poder reconstruirlos luego)
+    # Detect existing indexes BEFORE rewriting (so they can be rebuilt afterwards)
     with _zip.ZipFile(path, "r") as zf_prev:
         idx_cols_pre = _detect_existing_indexes(zf_prev)
 
-    # 3) Reescritura atómica del ZIP (usa helper local _zip_replace_entries)
-    # Borrar tanto chunks como todos los archivos de indexes/, y mantener todo lo demás (profiles/usage/* incluido)
+    # 3) Atomic ZIP rewrite (uses local helper _zip_replace_entries)
+    # Delete both chunks and all indexes/ files, and keep everything else (including profiles/usage/*)
     with _zip.ZipFile(path, "r") as zf_idx:
         index_paths = [e.filename for e in zf_idx.infolist() if e.filename.startswith("indexes/")]
     to_delete = chunk_paths + index_paths
     to_add = {name: data for name, data in new_parts}
     _zip_replace_entries(path, to_delete, to_add)
 
-    # 4) Reconstrucción de índices existentes + snapshot + journal
-    # Usar los índices detectados antes de la reescritura
+    # 4) Rebuild existing indexes + snapshot + journal
+    # Use the indexes detected before the rewrite
     idx_cols = idx_cols_pre
 
     rebuild_spec = {}
@@ -1760,7 +1760,7 @@ def optimize(path: str,
         })
         reindexed_cols = list(rebuild_spec.keys())
 
-    # 5) (Importante) No tocar profiles/usage.json aquí. Baseline/Post lo maneja `surx stats`.
+    # 5) (Important) Do not touch profiles/usage.json here. Baseline/Post is handled by `surx stats`.
 
     return {
         "changed": True,
@@ -1800,7 +1800,7 @@ def _load_index_entries(zf: _zip.ZipFile):
 
 def _bloom_maybe(bloom_meta: dict, value: str) -> bool:
     """
-    Devuelve True si el bloom 'quizás' contiene el valor.
+    Return True if the bloom 'maybe' contains the value.
     Si falta metadata, retorna True (conservador).
     """
     try:
@@ -1878,7 +1878,7 @@ def plan_plus(path: str, where: str) -> dict:
                 col, op, val = m.group(1), m.group(2), m.group(3).strip()
                 val = val.strip(" '\"")
                 cand = _cands_for_pred(idx, col, op, val)
-                # normalización estética de pred (limpia paréntesis redundantes)
+                # cosmetic normalization of pred (cleans redundant parentheses)
                 pred_clean = pred.strip()
                 if pred_clean.startswith("(") and pred_clean.endswith(")"):
                     pred_clean = pred_clean[1:-1].strip()

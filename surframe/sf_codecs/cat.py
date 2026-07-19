@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Stub de perfil categórico (dict top-K, escape)."""
+"""Categorical profile stub (top-K dict, escape)."""
 from __future__ import annotations
 from typing import Dict, Any
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Stub de perfil temporal (gorilla/pwl)."""
+"""Temporal profile stub (gorilla/pwl)."""
 from __future__ import annotations
 from typing import Dict, Any
 

@@ -1,32 +1,32 @@
 # Copyright 2025 Christ10-8
 # Licensed under the Apache License, Version 2.0
-"""SURFRAME: contenedor SURX firmado, cifrado por columna y auditable.
+"""SURFRAME: signed, column-encrypted, auditable SURX container.
 
-0.2.0: exports explicitos (el __init__ anterior tenia tres bloques PATCH que
-se pisaban el __all__ entre si), firma Ed25519 real (surframe.signing),
-verificador de auditoria, y cifrado multi-llamada sin perdida de datos.
+0.2.0: explicit exports (the previous __init__ had three PATCH blocks that
+clobbered each other's __all__), real Ed25519 signing (surframe.signing),
+an audit verifier, and multi-call encryption without data loss.
 """
 from __future__ import annotations
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
-# ---- Core: contenedor SURX ----
+# ---- Core: SURX container ----
 from .io import (
     write, read, inspect, plan, plan_plus, validate, optimize,
     snapshot, list_snapshots, get_snapshot, resolve_as_of, log,
     reindex, advise, update_usage_kpis, encrypt,
 )
 
-# ---- Cifrado por columna ----
+# ---- Column encryption ----
 from .crypto import (
     encrypt_columns_in_surx, decrypt_columns_in_surx,
     WrongPassphrase, CorruptCiphertext,
 )
 
-# ---- Auditoria ----
+# ---- Audit ----
 from .audit import append_audit_event, verify_audit_chain, read_audit_events
 
-# ---- Firma Ed25519 (nuevo en 0.2.0) ----
+# ---- Ed25519 signing (new in 0.2.0) ----
 from .signing import (
     generate_keypair, sign_container, verify_container,
     save_private_key, load_private_key, save_public_key, load_public_key,
@@ -36,16 +36,16 @@ from .signing import (
 # ---- Registry (transparency log, nuevo en 0.3.0) ----
 from .registry import seal_with_registry, verify_registry_seal
 
-# ---- Registro (transparency log, nuevo en 0.3.0) ----
+# ---- Registry (transparency log, new in 0.3.0) ----
 from .registry_client import seal_container_remote, check_seal
 
-# ---- ANN / busqueda vectorial ----
+# ---- ANN / vector search ----
 from .ann import ann_build, ann_query
 
 
 def vsearch(container, *, col="embedding", query_vec=None, k=5,
             metric="cosine", where=None, id_col="id", columns=None):
-    """Alias de busqueda vectorial (compat con tests): mapea query_vec -> q."""
+    """Vector-search alias (test compat): maps query_vec -> q."""
     return ann_query(container, col=col, q=query_vec, k=int(k),
                      metric=metric, where=where, id_col=id_col, columns=columns)
 

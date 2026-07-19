@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Stub de perfil numérico (predictor + residuales)."""
+"""Numeric profile stub (predictor + residuals)."""
 from __future__ import annotations
 from typing import Dict, Any
 
