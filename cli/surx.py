@@ -1,7 +1,7 @@
 # Copyright 2025 Christ10-8
 # Licensed under the Apache License, Version 2.0
-"""CLI de SURFRAME. En 0.1.5 el help prometia write|read|plan|inspect pero
-ninguno estaba registrado (solo comandos PRO de un modulo no incluido).
+"""SURFRAME CLI. In 0.1.5 the help advertised write|read|plan|inspect but
+none were actually registered (only PRO commands from a module that wasn't shipped).
 0.2.0 wires the full core + Ed25519 signing/verification."""
 from __future__ import annotations
 
@@ -253,17 +253,6 @@ def export(path: str,
     if not include_container:
         typer.echo("  note     : container referenced by hash (use --include-container to embed)")
     typer.echo("")
-
-
-@app.command()
-def seal(path: str,
-         api_key: str = typer.Option(..., envvar="SURX_REGISTRY_KEY"),
-         registry: str = typer.Option("https://surx-registry.fly.dev", envvar="SURX_REGISTRY_URL")):
-    """Seal the container in the transparency log (SURX Registry)."""
-    from surframe import seal_with_registry
-    r = seal_with_registry(path, api_key, registry_url=registry)
-    typer.echo(f"OK: sealed at position {r['seal']['position']} in the log")
-    typer.echo(f"public verification: {r['verify_url']}")
 
 
 @app.command(name="verify-seal")
