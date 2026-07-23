@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sys
 from typing import Optional, List
+from zipfile import BadZipFile
 
 import typer
 
@@ -16,6 +17,18 @@ app = typer.Typer(add_completion=False, help="SURX CLI — signed, encrypted, au
 
 def _echo_json(obj) -> None:
     typer.echo(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+
+
+# Errors that mean "the user did something wrong" (bad passphrase, missing file,
+# corrupt container...) as opposed to a bug in SURFRAME. These get a clean
+# one-line message and exit code 1 instead of a raw Python traceback.
+_USER_ERRORS = (ValueError, RuntimeError, OSError, BadZipFile)
+
+
+def _fail(err) -> None:
+    """Print a clean single-line error (no traceback) and exit with code 1."""
+    typer.secho(f"ERROR: {err}", fg=typer.colors.RED, err=True)
+    raise typer.Exit(code=1)
 
 
 # -------------------- core --------------------
@@ -43,7 +56,10 @@ def read(path: str,
     kwargs = {}
     if passphrase:
         kwargs["passphrase"] = passphrase
-    df = surframe.read(path, columns=cols, where=where, **kwargs)
+    try:
+        df = surframe.read(path, columns=cols, where=where, **kwargs)
+    except _USER_ERRORS as e:
+        _fail(e)
     if to_csv:
         df.to_csv(to_csv, index=False)
         typer.echo(f"OK: {len(df)} rows -> {to_csv}")
@@ -137,7 +153,10 @@ def encrypt(path: str, columns: str,
                                            envvar="SURX_PASSPHRASE")):
     """Encrypt columns (AES-GCM) into side-cars. Safe across multiple calls."""
     from surframe import encrypt_columns_in_surx
-    encrypt_columns_in_surx(path, [c.strip() for c in columns.split(",")], passphrase)
+    try:
+        encrypt_columns_in_surx(path, [c.strip() for c in columns.split(",")], passphrase)
+    except _USER_ERRORS as e:
+        _fail(e)
     typer.echo("OK: columns encrypted")
 
 
@@ -149,7 +168,10 @@ def decrypt(path: str,
     """Revert encrypted columns back to plaintext."""
     from surframe import decrypt_columns_in_surx
     cols = [c.strip() for c in columns.split(",")] if columns else []
-    decrypt_columns_in_surx(path, cols, passphrase)
+    try:
+        decrypt_columns_in_surx(path, cols, passphrase)
+    except _USER_ERRORS as e:
+        _fail(e)
     typer.echo("OK: columns decrypted")
 
 
