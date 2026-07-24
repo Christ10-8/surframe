@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS seals(
 CREATE TABLE IF NOT EXISTS api_keys(
   id INTEGER PRIMARY KEY AUTOINCREMENT, key_hash TEXT UNIQUE NOT NULL,
   tier TEXT NOT NULL DEFAULT 'free', month TEXT NOT NULL DEFAULT '',
-  used INTEGER NOT NULL DEFAULT 0, label TEXT, created TEXT NOT NULL);
+  used INTEGER NOT NULL DEFAULT 0, label TEXT, created TEXT NOT NULL,
+  license_hash TEXT, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_seals_root ON seals(entries_root);
 """
@@ -27,8 +28,21 @@ def connect(path: str | None = None) -> sqlite3.Connection:
         _conn = sqlite3.connect(p, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(SCHEMA)
+        _migrate(_conn)
         _conn.commit()
     return _conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the first deploy. Safe to run on every start."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(api_keys)")}
+    if "license_hash" not in cols:
+        conn.execute("ALTER TABLE api_keys ADD COLUMN license_hash TEXT")
+    if "revoked" not in cols:
+        conn.execute("ALTER TABLE api_keys ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0")
+    # Index goes here, not in SCHEMA: on an existing database the column only
+    # exists after the ALTER above has run.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keys_license ON api_keys(license_hash)")
 
 def reset_for_tests(path: str) -> None:
     global _conn

@@ -36,17 +36,29 @@ def _hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def create_key(tier: str, label: str = "") -> str:
+def create_key(tier: str, label: str = "", license_hash: Optional[str] = None) -> str:
     key = "surx_" + secrets.token_urlsafe(24)
     conn = db.connect()
-    conn.execute("INSERT INTO api_keys(key_hash,tier,month,used,label,created) VALUES(?,?,?,0,?,?)",
-                 (_hash_key(key), tier, month_key(), label, now_iso()))
+    conn.execute(
+        "INSERT INTO api_keys(key_hash,tier,month,used,label,created,license_hash) "
+        "VALUES(?,?,?,0,?,?,?)",
+        (_hash_key(key), tier, month_key(), label, now_iso(), license_hash))
     conn.commit()
     return key
 
 
+def revoke_keys_for_license(license_hash: str) -> int:
+    """Revoke every API key previously issued for this license. Returns how many."""
+    conn = db.connect()
+    with db.lock():
+        cur = conn.execute("UPDATE api_keys SET revoked=1 "
+                           "WHERE license_hash=? AND revoked=0", (license_hash,))
+        conn.commit()
+        return cur.rowcount
+
+
 def resolve_key(key: str) -> Optional[dict]:
-    row = db.connect().execute("SELECT * FROM api_keys WHERE key_hash=?",
+    row = db.connect().execute("SELECT * FROM api_keys WHERE key_hash=? AND revoked=0",
                                (_hash_key(key),)).fetchone()
     return dict(row) if row else None
 
@@ -55,10 +67,10 @@ def consume_quota(key: str) -> dict:
     """Devuelve la fila de la key si tiene cupo este mes; ValueError si no."""
     conn = db.connect()
     with db.lock():
-        row = conn.execute("SELECT * FROM api_keys WHERE key_hash=?",
+        row = conn.execute("SELECT * FROM api_keys WHERE key_hash=? AND revoked=0",
                            (_hash_key(key),)).fetchone()
         if not row:
-            raise PermissionError("API key invalida.")
+            raise PermissionError("API key invalida o revocada.")
         mk = month_key()
         used = row["used"] if row["month"] == mk else 0
         limit = TIERS.get(row["tier"], 0)
@@ -70,14 +82,21 @@ def consume_quota(key: str) -> dict:
 
 
 def activate_license(license_key: str) -> str:
-    """Valida una license key de Lemon Squeezy y emite una API key del tier correspondiente."""
+    """Validate a Lemon Squeezy license key and issue an API key for its tier.
+
+    One license == one live API key. Re-activating the same license (e.g. the
+    customer lost their key) revokes the previous one and issues a fresh key,
+    so a single subscription can never accumulate extra quota.
+    """
+    lic_hash = _hash_key(license_key)
     fake = os.environ.get(DEV_FAKE_LS, "")
-    if fake:  # camino de test/dev sin red
+    if fake:  # test/dev path, no network
         mapping = dict(p.split(":") for p in fake.split(",") if ":" in p)
         tier = mapping.get(license_key)
         if not tier:
             raise PermissionError("License key invalida.")
-        return create_key(tier, label=f"ls:{license_key[:8]}")
+        revoke_keys_for_license(lic_hash)
+        return create_key(tier, label=f"ls:{license_key[:8]}", license_hash=lic_hash)
 
     variants = dict(p.split(":") for p in os.environ.get(LS_VARIANTS_ENV, "").split(",") if ":" in p)
     body = urllib.parse.urlencode({"license_key": license_key}).encode()
@@ -91,7 +110,8 @@ def activate_license(license_key: str) -> str:
     tier = variants.get(variant_id)
     if not tier:
         raise PermissionError(f"Variant {variant_id} sin tier mapeado ({LS_VARIANTS_ENV}).")
-    return create_key(tier, label=f"ls:{license_key[:8]}")
+    revoke_keys_for_license(lic_hash)
+    return create_key(tier, label=f"ls:{license_key[:8]}", license_hash=lic_hash)
 
 
 # -------------------- transparency log --------------------
