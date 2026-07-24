@@ -64,6 +64,14 @@ def activate(body: ActivateIn):
         key = core.activate_license(body.license_key)
     except PermissionError as e:
         raise HTTPException(403, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    except Exception:
+        # This endpoint is called from the browser. An unhandled exception would
+        # return a bare 500 without CORS headers, which the browser reports as a
+        # misleading CORS failure instead of the real problem. Keep it handled.
+        raise HTTPException(500, "Unexpected error while activating the license. "
+                                 "Please contact surframe.dev@gmail.com.")
     row = core.resolve_key(key)
     return {"api_key": key, "tier": row["tier"], "quota": core.TIERS[row["tier"]]}
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import secrets
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -102,8 +103,28 @@ def activate_license(license_key: str) -> str:
     body = urllib.parse.urlencode({"license_key": license_key}).encode()
     req = urllib.request.Request(LS_VALIDATE_URL, data=body,
                                  headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        data = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # Lemon Squeezy answers with a 4xx (not 200 + valid:false) for keys it does
+        # not recognise. Without this branch a customer who mistypes one character
+        # gets an opaque 500 instead of a readable "invalid license key".
+        detail = ""
+        try:
+            detail = (json.loads(e.read()) or {}).get("error") or ""
+        except Exception:
+            pass
+        if 400 <= e.code < 500:
+            raise PermissionError("Invalid or expired license key."
+                                  + (f" ({detail})" if detail else ""))
+        raise RuntimeError("The license server is unavailable right now. "
+                           "Please try again in a few minutes.")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise RuntimeError("Could not reach the license server. "
+                           "Please try again in a few minutes.")
+    except ValueError:
+        raise RuntimeError("Unexpected response from the license server.")
     if not data.get("valid"):
         raise PermissionError("Invalid or expired license key.")
     variant_id = str(data.get("meta", {}).get("variant_id", ""))
