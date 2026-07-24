@@ -23,7 +23,7 @@ from .crypto import _rewrite_zip_with_replacements
 from .signing import SIG_PATH, _entries_root, _entry_hashes
 
 RECEIPT_PATH = "signatures/registry_seal.json"
-DEFAULT_REGISTRY = "https://surx-registry.fly.dev"
+DEFAULT_REGISTRY = "https://api.surframe.dev"
 
 
 def _http_json(url: str, payload: Optional[dict] = None,

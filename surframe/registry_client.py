@@ -26,7 +26,7 @@ from .crypto import _rewrite_zip_with_replacements
 from .signing import SIG_PATH, _entry_hashes, _entries_root
 
 RECEIPT_PATH = "signatures/registry_seal.json"
-DEFAULT_REGISTRY = os.environ.get("SURX_REGISTRY", "http://localhost:8000")
+DEFAULT_REGISTRY = os.environ.get("SURX_REGISTRY", "https://api.surframe.dev")
 
 
 def _post(url: str, body: dict, headers: Dict[str, str]) -> dict:

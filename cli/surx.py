@@ -279,7 +279,7 @@ def export(path: str,
 
 @app.command(name="verify-seal")
 def verify_seal(path: str,
-                registry: Optional[str] = typer.Option(None, envvar="SURX_REGISTRY_URL"),
+                registry: Optional[str] = typer.Option(None, envvar="SURX_REGISTRY"),
                 pubkey_hex: Optional[str] = typer.Option(None, help="Registry key pinning")):
     """Verify the notarized seal against the registry. Exit 0/1."""
     from surframe import verify_registry_seal
@@ -296,7 +296,7 @@ def verify_seal(path: str,
 def seal(path: str,
          api_key: str = typer.Option(..., envvar="SURX_API_KEY"),
          registry: str = typer.Option("", envvar="SURX_REGISTRY",
-                                      help="Registry URL (default: env or localhost)")):
+                                      help="Registry URL (default: https://api.surframe.dev)")):
     """Notarize the signed container in the transparency log (free tier)."""
     from surframe.registry_client import seal_container_remote
     r = seal_container_remote(path, api_key, registry)
@@ -352,7 +352,14 @@ def tier():
 
 
 def main():
-    app()
+    # Single place where "user errors" (bad passphrase, missing file, corrupt
+    # container, registry unreachable...) become a clean one-line message plus
+    # exit code 1, instead of a raw Python traceback. Bugs still raise normally.
+    try:
+        app()
+    except _USER_ERRORS as e:
+        typer.secho(f"ERROR: {e}", fg=typer.colors.RED, err=True)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
