@@ -70,12 +70,12 @@ def consume_quota(key: str) -> dict:
         row = conn.execute("SELECT * FROM api_keys WHERE key_hash=? AND revoked=0",
                            (_hash_key(key),)).fetchone()
         if not row:
-            raise PermissionError("API key invalida o revocada.")
+            raise PermissionError("Invalid or revoked API key.")
         mk = month_key()
         used = row["used"] if row["month"] == mk else 0
         limit = TIERS.get(row["tier"], 0)
         if used >= limit:
-            raise ValueError(f"Cupo mensual agotado para tier '{row['tier']}' ({limit} sellos/mes).")
+            raise ValueError(f"Monthly quota exhausted for tier '{row['tier']}' ({limit} seals/month).")
         conn.execute("UPDATE api_keys SET month=?, used=? WHERE id=?", (mk, used + 1, row["id"]))
         conn.commit()
         return dict(row)
@@ -94,7 +94,7 @@ def activate_license(license_key: str) -> str:
         mapping = dict(p.split(":") for p in fake.split(",") if ":" in p)
         tier = mapping.get(license_key)
         if not tier:
-            raise PermissionError("License key invalida.")
+            raise PermissionError("Invalid license key.")
         revoke_keys_for_license(lic_hash)
         return create_key(tier, label=f"ls:{license_key[:8]}", license_hash=lic_hash)
 
@@ -105,11 +105,11 @@ def activate_license(license_key: str) -> str:
     with urllib.request.urlopen(req, timeout=15) as r:
         data = json.loads(r.read())
     if not data.get("valid"):
-        raise PermissionError("License key invalida o expirada.")
+        raise PermissionError("Invalid or expired license key.")
     variant_id = str(data.get("meta", {}).get("variant_id", ""))
     tier = variants.get(variant_id)
     if not tier:
-        raise PermissionError(f"Variant {variant_id} sin tier mapeado ({LS_VARIANTS_ENV}).")
+        raise PermissionError(f"Variant {variant_id} is not mapped to a tier ({LS_VARIANTS_ENV}).")
     revoke_keys_for_license(lic_hash)
     return create_key(tier, label=f"ls:{license_key[:8]}", license_hash=lic_hash)
 
@@ -133,7 +133,7 @@ class Registry:
         encadenado al log. Append bajo lock (leccion: race condition)."""
         if not (isinstance(entries_root, str) and len(entries_root) == 64
                 and all(c in "0123456789abcdef" for c in entries_root)):
-            raise ValueError("entries_root debe ser SHA-256 hex de 64 chars.")
+            raise ValueError("entries_root must be a 64-char SHA-256 hex string.")
         conn = db.connect()
         with db.lock():
             n_prev, prev_hash = self._head()
@@ -181,7 +181,7 @@ class Registry:
         contra el imprint real (leccion: nunca confiar en un campo editable)."""
         row = self.get(seal_id)
         if not row:
-            return {"found": False, "valid": False, "reason": "seal_id inexistente"}
+            return {"found": False, "valid": False, "reason": "seal_id not found"}
         payload = json.loads(row["payload_json"])
         from .signer import verify_issuer
         sig_ok = verify_issuer(payload["issuer_public_key"], payload, row["issuer_sig"])

@@ -51,11 +51,11 @@ def free_key(request: Request):
     ip = request.client.host if request.client else "?"
     last = _free_ips.get(ip, 0.0)
     if time.time() - last < 3600:
-        raise HTTPException(429, "Una key gratis por hora por IP. Tiers pagos: /pricing")
+        raise HTTPException(429, "One free key per hour per IP. Paid tiers: https://surframe.dev/#pricing")
     _free_ips[ip] = time.time()
     key = core.create_key("free", label=f"ip:{ip}")
     return {"api_key": key, "tier": "free",
-            "quota": core.TIERS["free"], "note": "Guardala: no se puede recuperar."}
+            "quota": core.TIERS["free"], "note": "Save it now: it cannot be recovered."}
 
 
 @app.post("/v1/keys/activate")
@@ -71,7 +71,7 @@ def activate(body: ActivateIn):
 @app.post("/v1/seal")
 def seal(body: SealIn, x_api_key: str = Header(default="")):
     if not x_api_key:
-        raise HTTPException(401, "Falta header X-API-Key. Key gratis: POST /v1/keys/free")
+        raise HTTPException(401, "Missing X-API-Key header. Get a free key: POST /v1/keys/free")
     try:
         row = core.consume_quota(x_api_key)
     except PermissionError as e:

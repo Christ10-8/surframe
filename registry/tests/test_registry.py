@@ -34,7 +34,13 @@ except RuntimeError:
     check("falla sin clave generada", True)
 pub = bootstrap(os.environ["REGISTRY_KEY_PATH"], "test-pass")
 mode = oct(os.stat(os.environ["REGISTRY_KEY_PATH"]).st_mode & 0o777)
-check("PEM con permisos 0600", mode == "0o600", mode)
+# Windows has no POSIX permission bits: os.chmod() only toggles the read-only
+# flag, so the file always reports 0o666. The check is meaningful on the Linux
+# hosts we actually deploy to, so skip it elsewhere instead of failing.
+if sys.platform == "win32":
+    print("  [SKIP] PEM con permisos 0600 - no aplica en Windows")
+else:
+    check("PEM con permisos 0600", mode == "0o600", mode)
 raw = open(os.environ["REGISTRY_KEY_PATH"], "rb").read()
 check("PEM cifrado (ENCRYPTED PRIVATE KEY)", b"ENCRYPTED" in raw)
 saved = os.environ.pop("REGISTRY_KEY_PASSPHRASE")
