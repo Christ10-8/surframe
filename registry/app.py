@@ -199,7 +199,6 @@ footer a{{color:var(--ink)}}
 <div class="row"><dt>Signer pubkey</dt><dd>{spk}</dd></div>
 <div class="row"><dt>Log position</dt><dd>#{n} · chain {chain}</dd></div>
 <div class="row"><dt>Issuer signature</dt><dd class="{sig_cls}">{sig_state}</dd></div>
-<div class="row"><dt>RFC 3161</dt><dd>{tsa}</dd></div>
 </dl>
 <footer>Anyone can audit the full log: <a href="/v1/log/audit">/v1/log/audit</a> ·
 <a href="/v1/checkpoint">signed checkpoint</a>. Verify offline with
@@ -215,7 +214,7 @@ def seal_page(seal_id: str):
             sid=html.escape(seal_id), state_color="var(--stamp)", state_word="NOT FOUND",
             cls="bad", state_line="No seal with this id exists in the log.",
             root="—", count="—", ts="—", signer="—", spk="—", n="—", chain="—",
-            sig_cls="bad", sig_state="—", tsa="—"), status_code=404)
+            sig_cls="bad", sig_state="—"), status_code=404)
     p = rep["payload"]
     ok = rep["valid"]
     return HTMLResponse(_PAGE.format(
@@ -223,7 +222,7 @@ def seal_page(seal_id: str):
         state_color="var(--seal)" if ok else "var(--stamp)",
         state_word="VERIFIED" if ok else "TAMPERED / INVALID",
         cls="ok" if ok else "bad",
-        state_line="Issuer signature, chain link and timestamp all check out."
+        state_line="Issuer signature and chain link both check out."
                    if ok else "One or more checks failed — do not trust this artifact.",
         root=html.escape(p["entries_root"]),
         count=p["entry_count"], ts=html.escape(p["ts"]),
@@ -231,5 +230,4 @@ def seal_page(seal_id: str):
         spk=html.escape(p["subject"]["public_key"] or "—"),
         n=p["n"], chain=html.escape(rep["chain_hash"][:16]) + "…",
         sig_cls="ok" if rep["issuer_sig_ok"] else "bad",
-        sig_state="valid" if rep["issuer_sig_ok"] else "INVALID",
-        tsa=rep["rfc3161"]))
+        sig_state="valid" if rep["issuer_sig_ok"] else "INVALID"))
