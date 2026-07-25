@@ -66,6 +66,14 @@ def seal_container_remote(path: str, api_key: str,
     return receipt
 
 
+def get_usage(api_key: str, registry_url: str = "") -> Dict[str, Any]:
+    """Read the monthly quota for an API key. Does not consume anything."""
+    base = (registry_url or DEFAULT_REGISTRY).rstrip("/")
+    req = urllib.request.Request(f"{base}/v1/usage", headers={"X-API-Key": api_key})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+
 def check_seal(path: str, registry_url: str = "") -> Dict[str, Any]:
     """Verify the seal: current content vs sealed, issuer signature, and registry."""
     with ZipFile(path, "r") as zf:

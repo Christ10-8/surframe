@@ -302,6 +302,23 @@ def seal(path: str,
     r = seal_container_remote(path, api_key, registry)
     typer.echo(f"OK: seal {r['seal_id']} (log #{r['n']})")
     typer.echo(f"public verification: {r.get('verify_url','')}")
+    q = r.get("quota")
+    if q:
+        typer.echo(f"quota: {q['used']}/{q['limit']} {q['tier']} seals this month "
+                   f"({q['remaining']} left)")
+
+
+@app.command()
+def usage(api_key: str = typer.Option(..., envvar="SURX_API_KEY"),
+          registry: str = typer.Option("", envvar="SURX_REGISTRY",
+                                        help="Registry URL (default: https://api.surframe.dev)")):
+    """Show how many seals your API key has used this month."""
+    from surframe.registry_client import get_usage
+    u = get_usage(api_key, registry)
+    typer.echo(f"tier      : {u['tier']}")
+    typer.echo(f"month     : {u['month']}")
+    typer.echo(f"used      : {u['used']} / {u['limit']}")
+    typer.echo(f"remaining : {u['remaining']}")
 
 
 @app.command(name="check-seal")

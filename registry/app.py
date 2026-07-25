@@ -41,6 +41,16 @@ class ActivateIn(BaseModel):
     license_key: str
 
 
+@app.get("/v1/usage")
+def usage(x_api_key: str = Header(default="")):
+    if not x_api_key:
+        raise HTTPException(401, "Missing X-API-Key header.")
+    try:
+        return core.get_usage(x_api_key)
+    except PermissionError as e:
+        raise HTTPException(401, str(e))
+
+
 @app.get("/v1/health")
 def health():
     return {"ok": True, "issuer_public_key": reg().signer.public_hex}
@@ -76,6 +86,16 @@ def activate(body: ActivateIn):
     return {"api_key": key, "tier": row["tier"], "quota": core.TIERS[row["tier"]]}
 
 
+@app.get("/v1/usage")
+def usage(x_api_key: str = Header(default="")):
+    if not x_api_key:
+        raise HTTPException(401, "Missing X-API-Key header.")
+    try:
+        return core.usage(x_api_key)
+    except PermissionError as e:
+        raise HTTPException(401, str(e))
+
+
 @app.post("/v1/seal")
 def seal(body: SealIn, x_api_key: str = Header(default="")):
     if not x_api_key:
@@ -90,6 +110,8 @@ def seal(body: SealIn, x_api_key: str = Header(default="")):
                          entry_count=body.entry_count,
                          subject=body.subject, tier=row["tier"])
     receipt["verify_url"] = f"{BASE_URL}/s/{receipt['seal_id']}"
+    receipt["quota"] = {"tier": row["tier"], "used": row["used"],
+                        "limit": row["limit"], "remaining": row["remaining"]}
     return receipt
 
 

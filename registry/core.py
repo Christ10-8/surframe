@@ -64,6 +64,19 @@ def resolve_key(key: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_usage(key: str) -> dict:
+    """Read-only view of a key's monthly quota. Does not consume anything."""
+    row = db.connect().execute("SELECT * FROM api_keys WHERE key_hash=? AND revoked=0",
+                               (_hash_key(key),)).fetchone()
+    if not row:
+        raise PermissionError("Invalid or revoked API key.")
+    mk = month_key()
+    used = row["used"] if row["month"] == mk else 0
+    limit = TIERS.get(row["tier"], 0)
+    return {"tier": row["tier"], "used": used, "limit": limit,
+            "remaining": max(0, limit - used), "month": mk}
+
+
 def consume_quota(key: str) -> dict:
     """Devuelve la fila de la key si tiene cupo este mes; ValueError si no."""
     conn = db.connect()
@@ -79,7 +92,23 @@ def consume_quota(key: str) -> dict:
             raise ValueError(f"Monthly quota exhausted for tier '{row['tier']}' ({limit} seals/month).")
         conn.execute("UPDATE api_keys SET month=?, used=? WHERE id=?", (mk, used + 1, row["id"]))
         conn.commit()
-        return dict(row)
+        d = dict(row)
+        d["used"] = used + 1
+        d["limit"] = limit
+        d["remaining"] = limit - (used + 1)
+        return d
+
+
+def usage(key: str) -> dict:
+    """Read-only quota snapshot for an API key. Does not consume anything."""
+    row = resolve_key(key)
+    if not row:
+        raise PermissionError("Invalid or revoked API key.")
+    mk = month_key()
+    used = row["used"] if row["month"] == mk else 0
+    limit = TIERS.get(row["tier"], 0)
+    return {"tier": row["tier"], "used": used, "limit": limit,
+            "remaining": max(0, limit - used), "month": mk}
 
 
 def activate_license(license_key: str) -> str:
