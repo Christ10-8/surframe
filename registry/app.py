@@ -224,6 +224,7 @@ dl{{border-top:1px solid var(--line)}}
 border-bottom:1px solid var(--line)}}
 dt{{color:var(--mut);font-size:13px;padding-top:2px}}
 dd{{font:400 13px/1.5 "Spline Sans Mono",monospace;word-break:break-all}}
+dd.prose{{word-break:normal;overflow-wrap:break-word}}
 .ok{{color:var(--seal)}}.bad{{color:var(--stamp)}}
 footer{{margin-top:26px;font-size:13px;color:var(--mut)}}
 footer a{{color:var(--ink)}}
@@ -233,13 +234,13 @@ footer a{{color:var(--ink)}}
 <h1>Seal <em>{sid}</em></h1>
 <div class="state">{state_word}</div>
 <dl>
-<div class="row"><dt>Status</dt><dd class="{cls}">{state_line}</dd></div>
+<div class="row"><dt>Status</dt><dd class="prose {cls}">{state_line}</dd></div>
 <div class="row"><dt>Dataset root</dt><dd>{root}</dd></div>
 <div class="row"><dt>Entries</dt><dd>{count}</dd></div>
 <div class="row"><dt>Sealed at</dt><dd>{ts}</dd></div>
 <div class="row"><dt>Signer</dt><dd>{signer}</dd></div>
 <div class="row"><dt>Signer pubkey</dt><dd>{spk}</dd></div>
-<div class="row"><dt>Signer identity</dt><dd class="{sv_cls}">{sv_state}</dd></div>
+<div class="row"><dt>Signer identity</dt><dd class="prose {sv_cls}">{sv_state}</dd></div>
 <div class="row"><dt>Log position</dt><dd>#{n} · chain {chain}</dd></div>
 <div class="row"><dt>Issuer signature</dt><dd class="{sig_cls}">{sig_state}</dd></div>
 </dl>
