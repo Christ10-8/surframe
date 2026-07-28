@@ -101,7 +101,13 @@ def append_audit_event(path: str, event: Dict[str, Any], sign: Optional[bool] = 
     if client:
         evt.setdefault("client", client)
 
-    date_yyyymmdd = evt["ts"][:10].replace("-", "")
+    # The log filename is derived from evt["ts"], which is caller-controlled. An
+    # unvalidated ts of "../../etc/" produced rel_log = "profiles/audit/../../etc/.jsonl":
+    # a zip entry escaping the audit region. Only 8 digits are accepted; anything
+    # else falls back to today's UTC date.
+    date_yyyymmdd = str(evt.get("ts", ""))[:10].replace("-", "")
+    if len(date_yyyymmdd) != 8 or not date_yyyymmdd.isdigit():
+        date_yyyymmdd = _iso_utc()[:10].replace("-", "")
     rel_log = f"{AUDIT_PREFIX}{date_yyyymmdd}.jsonl"
 
     do_sign = bool(sign) if sign is not None else \

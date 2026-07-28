@@ -206,11 +206,16 @@ def sign(path: str,
 @app.command()
 def verify(path: str,
            pubkey: Optional[str] = typer.Option(None, help="Public key PEM. Without it: self-attested"),
+           allow_appends: bool = typer.Option(
+               False, "--allow-appends",
+               help="Accept audit events appended after signing. They are chain-consistent "
+                    "but NOT authenticated: the chain is an unkeyed SHA-256, so anyone with "
+                    "write access can extend it. Off by default."),
            full: bool = typer.Option(False, help="Full JSON report")):
     """Verify signature and integrity. Exit 0 = valid, 1 = tampering/invalid."""
     from surframe import load_public_key, verify_container
     pk = load_public_key(pubkey) if pubkey else None
-    rep = verify_container(path, pk)
+    rep = verify_container(path, pk, allow_unattested_appends=allow_appends)
     if full:
         _echo_json(rep)
     else:
@@ -220,6 +225,10 @@ def verify(path: str,
         for k in ("modified", "missing", "added"):
             for name in rep[k]:
                 typer.echo(f"  {k}: {name}")
+        n = rep["audit"].get("unattested_appends", 0)
+        if n:
+            typer.echo(f"  audit: {n} event(s) appended after signing - NOT authenticated"
+                       + (" (accepted via --allow-appends)" if allow_appends else ""))
     raise typer.Exit(code=0 if rep["valid"] else 1)
 
 
@@ -277,17 +286,53 @@ def export(path: str,
     typer.echo("")
 
 
+def _run_check_seal(path, registry, issuer_key, pubkey, allow_appends, as_json):
+    """Shared implementation of check-seal / verify-seal.
+
+    0.4.0: verify-seal used to call surframe/registry.py, a SECOND registry client
+    that talked to /api/v1/* — endpoints this registry never exposed — and wrote a
+    different schema into signatures/registry_seal.json than seal does. So it
+    returned 404s and KeyErrors against production. That module is gone; both
+    commands now share the one client that has a trust anchor.
+    """
+    from surframe.registry_client import check_seal
+    from surframe.signing import load_public_key
+    pub_hex = load_public_key(pubkey) if pubkey else None
+    rep = check_seal(path, registry or "", issuer_key=issuer_key, pubkey=pub_hex,
+                     allow_unattested_appends=allow_appends)
+    if as_json:
+        _echo_json(rep)
+    else:
+        typer.echo(("VALID" if rep["valid"] else "INVALID") + f" - {rep['reason']}")
+        if rep.get("sealed"):
+            typer.echo(f"  container  : {'ok' if rep.get('container_sig_ok') else 'FAILED'}"
+                       + ("" if rep.get("signer_trusted")
+                          else "  (self-attested: no --pubkey, identity NOT proven)"))
+            typer.echo(f"  content    : {'matches the sealed state' if rep.get('local_match') else 'DOES NOT MATCH'}")
+            typer.echo(f"  issuer     : {'trusted anchor, signature ok' if rep.get('issuer_sig_ok') else 'NOT TRUSTED'}")
+            typer.echo(f"  bound to   : {'this container signing key' if rep.get('signer_bound') else 'A DIFFERENT KEY'}")
+            typer.echo(f"  registry   : {rep.get('registry')}")
+        if rep.get("verify_url"):
+            typer.echo(f"public page: {rep['verify_url']}")
+    raise typer.Exit(code=0 if rep["valid"] else 1)
+
+
 @app.command(name="verify-seal")
 def verify_seal(path: str,
                 registry: Optional[str] = typer.Option(None, envvar="SURX_REGISTRY"),
-                pubkey_hex: Optional[str] = typer.Option(None, help="Registry key pinning")):
+                issuer_key: Optional[str] = typer.Option(
+                    None, "--issuer-key", envvar="SURX_ISSUER_KEY",
+                    help="Registry issuer public key, 64-hex. Only needed for a "
+                         "self-hosted registry; surframe.dev is pinned in the package."),
+                pubkey: Optional[str] = typer.Option(
+                    None, "--pubkey", help="Signer public key PEM (identity). "
+                                           "Without it the signer is self-attested."),
+                allow_appends: bool = typer.Option(
+                    False, "--allow-appends",
+                    help="Accept audit events appended after signing (unauthenticated)."),
+                json_out: bool = typer.Option(False, "--json")):
     """Verify the notarized seal against the registry. Exit 0/1."""
-    from surframe import verify_registry_seal
-    rep = verify_registry_seal(path, registry_url=registry, registry_pubkey_hex=pubkey_hex)
-    typer.echo(("VALID" if rep["valid"] else "INVALID") + f" - {rep['reason']}")
-    if rep.get("verify_url"):
-        typer.echo(f"public page: {rep['verify_url']}")
-    raise typer.Exit(code=0 if rep["valid"] else 1)
+    _run_check_seal(path, registry, issuer_key, pubkey, allow_appends, json_out)
 
 
 # -------------------- registry (transparency log) --------------------
@@ -323,12 +368,18 @@ def usage(api_key: str = typer.Option(..., envvar="SURX_API_KEY"),
 
 @app.command(name="check-seal")
 def check_seal_cmd(path: str,
-                   registry: str = typer.Option("", envvar="SURX_REGISTRY")):
-    """Verify the seal: content vs sealed + issuer + registry. Exit 0/1."""
-    from surframe.registry_client import check_seal
-    rep = check_seal(path, registry)
-    _echo_json(rep)
-    raise typer.Exit(code=0 if rep["valid"] else 1)
+                   registry: str = typer.Option("", envvar="SURX_REGISTRY"),
+                   issuer_key: Optional[str] = typer.Option(
+                       None, "--issuer-key", envvar="SURX_ISSUER_KEY",
+                       help="Registry issuer public key, 64-hex (self-hosted only)."),
+                   pubkey: Optional[str] = typer.Option(
+                       None, "--pubkey", help="Signer public key PEM (identity)."),
+                   allow_appends: bool = typer.Option(
+                       False, "--allow-appends",
+                       help="Accept audit events appended after signing (unauthenticated)."),
+                   json_out: bool = typer.Option(True, "--json/--text")):
+    """Verify the seal: container + content vs sealed + trusted issuer + registry. Exit 0/1."""
+    _run_check_seal(path, registry, issuer_key, pubkey, allow_appends, json_out)
 
 
 # -------------------- PRO (gated) --------------------

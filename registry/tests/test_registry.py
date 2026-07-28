@@ -87,9 +87,10 @@ print("\n== R3: tamper del log + auditoria publica de cadena completa ==")
 for i in range(2, 6):
     client.post("/v1/seal", headers={"X-API-Key": key},
                 json={"entries_root": root(i), "entry_count": i, "subject": {}})
+_aud = client.get("/v1/log/audit").json()
 check("auditoria completa OK (5 sellos)",
-      client.get("/v1/log/audit").json() == {"ok": True, "size": 5,
-          "head": client.get("/v1/log/audit").json()["head"], "first_bad_n": None})
+      _aud["ok"] is True and _aud["size"] == 5 and _aud["first_bad_n"] is None
+      and _aud["first_bad_signature_n"] is None, str(_aud))
 row3 = conn.execute("SELECT * FROM seals WHERE n=3").fetchone()
 p3 = json.loads(row3["payload_json"]); p3["entries_root"] = root(999)
 conn.execute("UPDATE seals SET payload_json=? WHERE n=3", (json.dumps(p3),)); conn.commit()
@@ -137,14 +138,17 @@ check("checkpoint forjado NO verifica",
 
 print("\n== R8: pagina publica /s/{id} ==")
 h = client.get(f"/s/{sid}")
-check("HTML 200 con VERIFIED", h.status_code == 200 and "VERIFIED" in h.text
-      and "data-team" in h.text)
+# 0.4.0: este sello se creo SIN signature_doc, asi que el signer es declarado.
+# Decir "VERIFIED" ahi era la afirmacion falsa que encontro la auditoria.
+check("HTML 200, SEALED y signer marcado como no verificado",
+      h.status_code == 200 and "SEALED" in h.text and "VERIFIED" not in h.text
+      and "NOT verified" in h.text and "data-team" in h.text)
 check("seal inexistente -> 404 NOT FOUND",
       client.get("/s/sf-nope").status_code == 404)
 
 print("\n== R9: badge SVG (marketing embebido en el producto) ==")
 b = client.get(f"/badge/{sid}.svg")
-check("badge verified verde", b.status_code == 200 and "verified" in b.text
+check("badge sealed (signer no verificado)", b.status_code == 200 and ">sealed<" in b.text
       and "#1B7F5C" in b.text and b.headers["content-type"].startswith("image/svg"))
 b = client.get("/badge/sf-nope.svg")
 check("badge not found gris", "not found" in b.text and "#5B6770" in b.text)

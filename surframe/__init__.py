@@ -8,7 +8,7 @@ an audit verifier, and multi-call encryption without data loss.
 """
 from __future__ import annotations
 
-__version__ = "0.3.5"
+__version__ = "0.4.0"
 
 # ---- Core: SURX container ----
 from .io import (
@@ -34,7 +34,6 @@ from .signing import (
 )
 
 # ---- Registry (transparency log, nuevo en 0.3.0) ----
-from .registry import seal_with_registry, verify_registry_seal
 
 # ---- Registry (transparency log, new in 0.3.0) ----
 from .registry_client import seal_container_remote, check_seal
@@ -91,7 +90,6 @@ __all__ = [
     "save_private_key", "load_private_key", "save_public_key", "load_public_key",
     "KeyPair",
     # registry
-    "seal_with_registry", "verify_registry_seal",
     "seal_container_remote", "check_seal",
     # ann
     "ann_build", "ann_query", "vsearch",

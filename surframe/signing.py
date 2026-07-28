@@ -51,6 +51,20 @@ EXCLUDE_EXACT: Tuple[str, ...] = ("profiles/usage.json",)
 EXCLUDE_PREFIX_USAGE = "profiles/usage/"
 GENESIS = "0" * 64
 
+# --- Resource limits (0.4.0) -------------------------------------------------
+# A verifier is an attacker-facing surface: it runs on untrusted input, in CI and
+# in a hosted service. _entry_hashes() used to zf.read() whole entries into RAM,
+# so a 260 KB container with a 1000x ratio made the verifier allocate 256 MB.
+# We hash in a stream, cap the absolute size, and cap the ratio.
+HASH_CHUNK = 1 << 20                     # 1 MiB
+MAX_ENTRY_BYTES = int(os.environ.get("SURX_MAX_ENTRY_BYTES", 2 * 1024**3))   # 2 GiB
+MAX_TOTAL_BYTES = int(os.environ.get("SURX_MAX_TOTAL_BYTES", 8 * 1024**3))  # 8 GiB
+MAX_RATIO = float(os.environ.get("SURX_MAX_RATIO", 200))                    # x
+
+
+class ContainerLimitError(Exception):
+    """Declared or actual size exceeds a verifier resource limit."""
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -150,11 +164,104 @@ def _validate_zip_structure(names: List[str]) -> List[str]:
     return problems
 
 
+def _validate_zip_envelope(zf: ZipFile) -> List[str]:
+    """(0.4.0) The digest covers ENTRY CONTENT, not the raw file. That left three
+    unsigned channels that changed sha256(file) while verify said "valid":
+
+      * data PREPENDED before the first local header (polyglot / parser
+        confusion: some readers see the prefix, zipfile skips it),
+      * data APPENDED after the end-of-central-directory record,
+      * the zip archive COMMENT (a free-form unsigned field).
+
+    A container is a signed artifact, so it must be byte-exact: exactly one zip,
+    starting at offset 0, ending at the EOCD, no comment. Anything else is
+    ambiguity and we refuse it instead of blessing it.
+    """
+    problems: List[str] = []
+    infos = zf.infolist()
+
+    if zf.comment:
+        problems.append(f"unsigned zip comment present ({len(zf.comment)} bytes)")
+
+    if infos:
+        first = min(i.header_offset for i in infos)
+        if first != 0:
+            problems.append(f"{first} bytes prepended before the first zip entry")
+
+    # The EOCD must be the last record in the file.
+    fp = getattr(zf, "fp", None)
+    try:
+        if fp is not None and fp.seekable():
+            here = fp.tell()
+            fp.seek(0, os.SEEK_END)
+            total = fp.tell()
+            want = total - 22 - len(zf.comment or b"")
+            if want >= 0:
+                fp.seek(want)
+                if fp.read(4) != b"PK\x05\x06":
+                    problems.append("trailing bytes after the end-of-central-directory record")
+            fp.seek(here)
+    except (OSError, ValueError):
+        pass
+
+    # Declared sizes: refuse the bomb before allocating anything for it.
+    total_declared = 0
+    for i in infos:
+        if not _is_signed_entry(i.filename):
+            continue
+        total_declared += i.file_size
+        if i.file_size > MAX_ENTRY_BYTES:
+            problems.append(
+                f"entry exceeds size limit: {i.filename} declares {i.file_size} bytes "
+                f"(limit {MAX_ENTRY_BYTES}; raise SURX_MAX_ENTRY_BYTES to allow)")
+        if i.compress_size > 0:
+            ratio = i.file_size / i.compress_size
+            if ratio > MAX_RATIO:
+                problems.append(
+                    f"compression ratio limit exceeded: {i.filename} is {ratio:.0f}x "
+                    f"({i.compress_size} -> {i.file_size} bytes, limit {MAX_RATIO:.0f}x; "
+                    f"raise SURX_MAX_RATIO to allow)")
+    if total_declared > MAX_TOTAL_BYTES:
+        problems.append(
+            f"container exceeds total size limit: {total_declared} bytes "
+            f"(limit {MAX_TOTAL_BYTES}; raise SURX_MAX_TOTAL_BYTES to allow)")
+    return problems
+
+
+def _sha256_stream(zf: ZipFile, name: str, info) -> str:
+    """Hash one entry WITHOUT loading it whole into RAM, enforcing the caps as we
+    read (the declared file_size in the header is attacker-controlled, so the
+    real decompressed length is checked too)."""
+    h = hashlib.sha256()
+    read = 0
+    limit = min(MAX_ENTRY_BYTES, max(int(info.compress_size * MAX_RATIO), HASH_CHUNK))
+    with zf.open(name, "r") as fh:
+        while True:
+            chunk = fh.read(HASH_CHUNK)
+            if not chunk:
+                break
+            read += len(chunk)
+            if read > limit:
+                raise ContainerLimitError(
+                    f"compression ratio limit exceeded while reading {name}: "
+                    f"decompressed past {limit} bytes from {info.compress_size} "
+                    f"compressed (limit {MAX_RATIO:.0f}x)")
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _entry_hashes(zf: ZipFile) -> Dict[str, str]:
     out: Dict[str, str] = {}
-    for name in zf.namelist():
-        if _is_signed_entry(name):
-            out[name] = hashlib.sha256(zf.read(name)).hexdigest()
+    total = 0
+    for info in zf.infolist():
+        name = info.filename
+        if not _is_signed_entry(name):
+            continue
+        out[name] = _sha256_stream(zf, name, info)
+        total += info.file_size
+        if total > MAX_TOTAL_BYTES:
+            raise ContainerLimitError(
+                f"container exceeds total size limit ({MAX_TOTAL_BYTES} bytes)")
     return out
 
 
@@ -216,7 +323,8 @@ def sign_container(path: str, private_key_hex: str, *, signer: Optional[str] = N
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
 
     with ZipFile(path, "r") as zf:
-        problems = _validate_zip_structure(zf.namelist())
+        problems = (_validate_zip_structure(zf.namelist())
+                    + _validate_zip_envelope(zf))
         if problems:
             raise ValueError("Unsafe zip structure, refusing to sign: " + "; ".join(problems))
         eh = _entry_hashes(zf)
@@ -251,13 +359,23 @@ def sign_container(path: str, private_key_hex: str, *, signer: Optional[str] = N
     return payload
 
 
-def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[str, Any]:
-    """Verify signature + integrity. Without public_key_hex, uses the embedded one (self-attested)."""
+def verify_container(path: str, public_key_hex: Optional[str] = None, *,
+                     allow_unattested_appends: bool = False) -> Dict[str, Any]:
+    """Verify signature + integrity. Without public_key_hex, uses the embedded one (self-attested).
+
+    allow_unattested_appends: the audit log is EXCLUDED from the signed digest so
+    it can grow after signing. That means events appended after the signature are
+    chain-consistent but NOT authenticated — anyone with write access can forge
+    them. Since 0.4.0 that makes the container invalid by default; pass True (or
+    `surx verify --allow-appends`) to accept a container whose only difference
+    from the signed state is appended audit events.
+    """
     report: Dict[str, Any] = {
         "valid": False, "reason": None, "signer": None, "signed_at": None,
         "trusted_key": public_key_hex is not None,
         "modified": [], "missing": [], "added": [],
-        "audit": {"consistent": None, "append_only": None, "detail": {}},
+        "audit": {"consistent": None, "append_only": None,
+                  "unattested_appends": 0, "detail": {}},
     }
     # A physically corrupt container (broken central directory, deflate stream
     # with a flipped byte, bad CRC, truncated) must NOT crash with a raw
@@ -266,7 +384,7 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
     try:
         with ZipFile(path, "r") as zf:
             names = zf.namelist()
-            problems = _validate_zip_structure(names)
+            problems = _validate_zip_structure(names) + _validate_zip_envelope(zf)
             if problems:
                 report["reason"] = "unsafe zip structure: " + "; ".join(problems)
                 return report
@@ -274,8 +392,16 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
                 report["reason"] = "unsigned: missing signatures/ed25519.json"
                 return report
             doc = json.loads(zf.read(SIG_PATH))
-            payload = doc.get("payload", {})
-            sig_hex = doc.get("signature", "")
+            # A malformed signature document is just another form of "invalid".
+            # It must NOT surface as AttributeError/KeyError from deep inside:
+            # the docstring of this module promises a clean report.
+            if not isinstance(doc, dict) or not isinstance(doc.get("payload"), dict) \
+                    or not isinstance(doc.get("signature"), str):
+                report["reason"] = ("malformed signature document: expected "
+                                    "{payload: object, signature: string} in " + SIG_PATH)
+                return report
+            payload = doc["payload"]
+            sig_hex = doc["signature"]
             report["signer"] = payload.get("signer")
             report["signed_at"] = payload.get("signed_at")
 
@@ -306,7 +432,10 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
 
             # 3) audit: consistent AND append-only relative to the signed head
             signed_heads: Dict[str, str] = payload.get("audit_heads", {})
+            if not isinstance(signed_heads, dict):
+                signed_heads = {}
             audit_ok = True
+            unattested = 0
             for fname in sorted(set(_audit_files(zf)) | set(signed_heads)):
                 det: Dict[str, Any] = {}
                 if fname not in names:
@@ -321,16 +450,48 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
                     else:
                         sh = signed_heads.get(fname)
                         if sh is None:
+                            # An audit FILE that did not exist at signing time is
+                            # 100% unauthenticated content. It used to be reported
+                            # and then ignored, which is how "export by
+                            # auditor@bigfour.com" could be injected into a
+                            # container that still verified as valid.
+                            #
+                            # It is NOT hard-failed, though: a legitimate reader
+                            # appending on a later date creates exactly this, so
+                            # hard-failing would make any read of a signed
+                            # container invalid with no way out. It counts as
+                            # unattested and is governed by the same flag as any
+                            # other post-signing event — default closed, explicit
+                            # opt-in to accept.
                             det["status"] = "new_file_after_signing"
-                        elif sh == GENESIS or sh in hashes:
+                            det["unattested"] = len(hashes)
+                            unattested += len(hashes)
+                        elif sh == GENESIS:
                             det["status"] = "append_only_ok"
+                            det["unattested"] = len(hashes)
+                            unattested += len(hashes)
+                        elif sh in hashes:
+                            det["status"] = "append_only_ok"
+                            n_after = len(hashes) - (hashes.index(sh) + 1)
+                            det["unattested"] = n_after
+                            unattested += n_after
                         else:
                             det["status"] = "history_rewritten"
                             audit_ok = False
                 report["audit"]["detail"][fname] = det
             report["audit"]["consistent"] = audit_ok
             report["audit"]["append_only"] = audit_ok
-    except (BadZipFile, zlib.error, OSError, EOFError, json.JSONDecodeError) as exc:
+            report["audit"]["unattested_appends"] = unattested
+            # The chain is an UNKEYED SHA-256: continuing it needs no key, so
+            # post-signing events prove only "someone with write access added
+            # this". They are not evidence. Fail closed unless asked otherwise.
+            if unattested and not allow_unattested_appends:
+                audit_ok = False
+    except ContainerLimitError as exc:
+        report["reason"] = f"refused: {exc}"
+        return report
+    except (BadZipFile, zlib.error, OSError, EOFError, json.JSONDecodeError,
+            AttributeError, KeyError, TypeError, IndexError) as exc:
         report["reason"] = f"container unreadable: {type(exc).__name__}: {exc}"
         return report
 
@@ -343,7 +504,15 @@ def verify_container(path: str, public_key_hex: Optional[str] = None) -> Dict[st
             parts.append(f"{len(report['missing'])} missing entr" + ("y" if len(report['missing'])==1 else "ies"))
         if report["added"]:
             parts.append(f"{len(report['added'])} unsigned addition" + ("" if len(report['added'])==1 else "s"))
-        if not audit_ok:
+        det = report["audit"]["detail"]
+        n_new = sum(1 for d in det.values() if d.get("status") == "new_file_after_signing")
+        if report["audit"]["unattested_appends"] and not allow_unattested_appends:
+            msg = (f"{report['audit']['unattested_appends']} audit event(s) appended after "
+                   "signing are NOT authenticated")
+            if n_new:
+                msg += f" ({n_new} in audit file(s) created after signing)"
+            parts.append(msg + " (pass --allow-appends to accept)")
+        if not audit_ok and not parts:
             parts.append("audit log altered")
         report["reason"] = "tampering detected: " + ", ".join(parts)
     elif report["valid"]:

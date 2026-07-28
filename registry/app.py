@@ -35,6 +35,10 @@ class SealIn(BaseModel):
     entries_root: str = Field(min_length=64, max_length=64)
     entry_count: int = Field(ge=0)
     subject: dict = Field(default_factory=dict)
+    # The container's signatures/ed25519.json. Optional so that <=0.3.5 clients
+    # keep working, but when present it is the PROOF OF POSSESSION that turns
+    # subject.signer from a free-text claim into a verified one.
+    signature_doc: Optional[dict] = None
 
 
 class ActivateIn(BaseModel):
@@ -56,9 +60,27 @@ def health():
     return {"ok": True, "issuer_public_key": reg().signer.public_hex}
 
 
+def _client_ip(request: Request) -> str:
+    """Real client IP behind the Fly proxy.
+
+    request.client.host is the PROXY, so the per-IP rate limit either applied
+    globally to every user or could be spoofed with a forged header. Fly-Client-IP
+    is set by Fly itself and cannot be forged from outside; X-Forwarded-For is
+    only consulted as a fallback and only its LAST hop (the one appended by our
+    own proxy), never the client-controlled left-hand entries.
+    """
+    fly = request.headers.get("fly-client-ip")
+    if fly:
+        return fly.strip()
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[-1].strip()
+    return request.client.host if request.client else "?"
+
+
 @app.post("/v1/keys/free")
 def free_key(request: Request):
-    ip = request.client.host if request.client else "?"
+    ip = _client_ip(request)
     last = _free_ips.get(ip, 0.0)
     if time.time() - last < 3600:
         raise HTTPException(429, "One free key per hour per IP. Paid tiers: https://surframe.dev/#pricing")
@@ -86,16 +108,6 @@ def activate(body: ActivateIn):
     return {"api_key": key, "tier": row["tier"], "quota": core.TIERS[row["tier"]]}
 
 
-@app.get("/v1/usage")
-def usage(x_api_key: str = Header(default="")):
-    if not x_api_key:
-        raise HTTPException(401, "Missing X-API-Key header.")
-    try:
-        return core.usage(x_api_key)
-    except PermissionError as e:
-        raise HTTPException(401, str(e))
-
-
 @app.post("/v1/seal")
 def seal(body: SealIn, x_api_key: str = Header(default="")):
     if not x_api_key:
@@ -106,9 +118,16 @@ def seal(body: SealIn, x_api_key: str = Header(default="")):
         raise HTTPException(401, str(e))
     except ValueError as e:
         raise HTTPException(402, str(e))
-    receipt = reg().seal(entries_root=body.entries_root.lower(),
-                         entry_count=body.entry_count,
-                         subject=body.subject, tier=row["tier"])
+    try:
+        receipt = reg().seal(entries_root=body.entries_root.lower(),
+                             entry_count=body.entry_count,
+                             subject=body.subject, tier=row["tier"],
+                             signature_doc=body.signature_doc)
+    except ValueError as e:
+        # Proof of possession supplied but invalid: refuse rather than record a
+        # claim we cannot stand behind. The quota was already consumed, which is
+        # the correct incentive against probing.
+        raise HTTPException(400, str(e))
     receipt["verify_url"] = f"{BASE_URL}/s/{receipt['seal_id']}"
     receipt["quota"] = {"tier": row["tier"], "used": row["used"],
                         "limit": row["limit"], "remaining": row["remaining"]}
@@ -171,7 +190,8 @@ def badge(seal_id: str):
     if not rep["found"]:
         word, color = "not found", "#5B6770"
     elif rep["valid"]:
-        word, color = "verified", "#1B7F5C"
+        word, color = ("verified", "#1B7F5C") if rep.get("signer_verified") \
+                      else ("sealed", "#1B7F5C")
     else:
         word, color = "tampered", "#B3402A"
     w2 = 12 + 7 * len(word)
@@ -219,6 +239,7 @@ footer a{{color:var(--ink)}}
 <div class="row"><dt>Sealed at</dt><dd>{ts}</dd></div>
 <div class="row"><dt>Signer</dt><dd>{signer}</dd></div>
 <div class="row"><dt>Signer pubkey</dt><dd>{spk}</dd></div>
+<div class="row"><dt>Signer identity</dt><dd class="{sv_cls}">{sv_state}</dd></div>
 <div class="row"><dt>Log position</dt><dd>#{n} · chain {chain}</dd></div>
 <div class="row"><dt>Issuer signature</dt><dd class="{sig_cls}">{sig_state}</dd></div>
 </dl>
@@ -236,16 +257,29 @@ def seal_page(seal_id: str):
             sid=html.escape(seal_id), state_color="var(--stamp)", state_word="NOT FOUND",
             cls="bad", state_line="No seal with this id exists in the log.",
             root="—", count="—", ts="—", signer="—", spk="—", n="—", chain="—",
+            sv_cls="bad", sv_state="—",
             sig_cls="bad", sig_state="—"), status_code=404)
     p = rep["payload"]
     ok = rep["valid"]
+    # The signer is only VERIFIED when the sealer proved possession of the private
+    # key (0.4.0+). Older seals carry a self-declared identity, and saying
+    # "verified" for those was the false claim this page used to make.
+    sv = bool(rep.get("signer_verified"))
     return HTMLResponse(_PAGE.format(
         sid=html.escape(seal_id),
         state_color="var(--seal)" if ok else "var(--stamp)",
-        state_word="VERIFIED" if ok else "TAMPERED / INVALID",
+        state_word=("VERIFIED" if sv else "SEALED") if ok else "TAMPERED / INVALID",
         cls="ok" if ok else "bad",
-        state_line="Issuer signature and chain link both check out."
+        state_line=(("Issuer signature and chain link check out, and the signer "
+                     "proved possession of the signing key.") if sv else
+                    ("Issuer signature and chain link check out. The signer name "
+                     "below is DECLARED by whoever submitted the seal and was not "
+                     "verified by the registry — this seal proves that this dataset "
+                     "root existed at this time, not who produced it."))
                    if ok else "One or more checks failed — do not trust this artifact.",
+        sv_cls="ok" if sv else "bad",
+        sv_state=("proved possession of the signing key" if sv
+                  else "declared by the submitter, NOT verified"),
         root=html.escape(p["entries_root"]),
         count=p["entry_count"], ts=html.escape(p["ts"]),
         signer=html.escape(p["subject"]["signer"] or "—"),

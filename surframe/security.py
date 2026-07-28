@@ -5,7 +5,7 @@ SURFRAME PRO — Security stubs
 """
 from __future__ import annotations
 import hashlib, sys
-from .license import get_machine_id
+from .license import _machine_id as get_machine_id
 
 def fingerprint_runtime() -> str:
     base = f"{sys.version}|{get_machine_id()}"

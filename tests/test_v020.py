@@ -109,8 +109,17 @@ for i in range(4):
 kp = generate_keypair()
 sign_container(p, kp.private_hex, signer="christian")
 append_audit_event(p, {"op": "read", "n": 99})  # crecimiento legitimo post-firma
+# 0.4.0 — CAMBIO DE SEMANTICA. La cadena de auditoria es SHA-256 SIN clave: quien
+# tenga acceso de escritura puede continuarla con eventos inventados y el head
+# firmado sigue siendo ancestro. Por lo tanto un evento posterior a la firma NO es
+# evidencia. Ahora invalida por default y hay que aceptarlo explicitamente.
 rep = verify_container(p, kp.public_hex)
-check("append post-firma sigue valido (append-only)", rep["valid"], rep["reason"])
+check("append post-firma NO es evidencia por default", not rep["valid"], rep["reason"])
+check("el reporte cuenta los eventos no atestiguados",
+      rep["audit"]["unattested_appends"] == 1, str(rep["audit"]))
+rep = verify_container(p, kp.public_hex, allow_unattested_appends=True)
+check("append post-firma valido con --allow-appends (append-only)",
+      rep["valid"], rep["reason"])
 # atacante: borra el evento n=1 y RE-CALCULA toda la cadena (chain queda perfecta)
 fname = [n for n in zipfile.ZipFile(p).namelist() if n.startswith("profiles/audit/")][0]
 evts = [json.loads(l) for l in zipfile.ZipFile(p).read(fname).decode().strip().split("\n")]

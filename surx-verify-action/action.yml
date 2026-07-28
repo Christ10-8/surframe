@@ -6,23 +6,83 @@ inputs:
     description: "Path to the .surx container"
     required: true
   pubkey:
-    description: "Path to the Ed25519 public key PEM. Omit for self-attested check (integrity only, not identity)."
+    description: >-
+      Path to the Ed25519 public key PEM. STRONGLY recommended. Omit only for a
+      self-attested check, which proves integrity but NOT identity: an attacker
+      who re-signs tampered content with their own key still exits 0.
     required: false
     default: ""
-  surframe-version:
-    description: "surframe version to install"
+  issuer-key:
+    description: "Registry issuer public key (64-hex). Only for a self-hosted registry."
     required: false
-    default: ">=0.2.0"
+    default: ""
+  allow-appends:
+    description: >-
+      Accept audit events appended after signing. They are chain-consistent but
+      NOT authenticated (unkeyed SHA-256 chain), so this is off by default.
+    required: false
+    default: "false"
+  surframe-version:
+    description: >-
+      Exact surframe version specifier. Pinned by default: this action IS the
+      integrity check, so installing it from a floating range would mean the
+      verifier itself is unverified.
+    required: false
+    default: "==0.4.0"
+  fail-on-self-attested:
+    description: "Fail the job when no pubkey was supplied, instead of only warning."
+    required: false
+    default: "false"
 runs:
   using: "composite"
   steps:
+    # Inputs go through env, never interpolated into the script body. `${{ }}`
+    # inside `run:` is textual substitution BEFORE bash sees it, so a quote or a
+    # `;` in an input becomes attacker-controlled shell — the #1 GitHub Actions
+    # vulnerability class. With env: the value is data, and "$VAR" keeps it data.
     - shell: bash
-      run: pip install "surframe${{ inputs.surframe-version }}"
-    - shell: bash
+      env:
+        SURFRAME_VERSION: ${{ inputs.surframe-version }}
       run: |
-        if [ -n "${{ inputs.pubkey }}" ]; then
-          surx verify "${{ inputs.path }}" --pubkey "${{ inputs.pubkey }}"
+        set -euo pipefail
+        case "$SURFRAME_VERSION" in
+          "=="*) : ;;
+          *) echo "::error::surframe-version must be an exact pin, e.g. '==0.4.0' (got '$SURFRAME_VERSION')"; exit 1 ;;
+        esac
+        python -m pip install --disable-pip-version-check "surframe$SURFRAME_VERSION"
+    - shell: bash
+      env:
+        PATH_IN: ${{ inputs.path }}
+        PUBKEY_IN: ${{ inputs.pubkey }}
+        ISSUER_IN: ${{ inputs.issuer-key }}
+        ALLOW_APPENDS: ${{ inputs.allow-appends }}
+        FAIL_SELF: ${{ inputs.fail-on-self-attested }}
+      run: |
+        set -euo pipefail
+        ARGS=()
+        [ "$ALLOW_APPENDS" = "true" ] && ARGS+=(--allow-appends)
+        if [ -n "$PUBKEY_IN" ]; then
+          surx verify "$PATH_IN" --pubkey "$PUBKEY_IN" "${ARGS[@]:-}"
         else
-          echo "::warning::No pubkey provided - self-attested verification (integrity only)"
-          surx verify "${{ inputs.path }}"
+          MSG="No pubkey provided - self-attested verification: integrity only, identity NOT proven"
+          if [ "$FAIL_SELF" = "true" ]; then echo "::error::$MSG"; exit 1; fi
+          echo "::warning::$MSG"
+          surx verify "$PATH_IN" "${ARGS[@]:-}"
+        fi
+    - shell: bash
+      env:
+        PATH_IN: ${{ inputs.path }}
+        PUBKEY_IN: ${{ inputs.pubkey }}
+        ISSUER_IN: ${{ inputs.issuer-key }}
+      run: |
+        set -euo pipefail
+        # os.environ, not string interpolation: substituting $PATH_IN into the
+        # Python source would just move the injection from bash into Python.
+        if python -c 'import os,sys,zipfile; sys.exit(0 if "signatures/registry_seal.json" in zipfile.ZipFile(os.environ["PATH_IN"]).namelist() else 1)' 2>/dev/null; then
+          ARGS=()
+          [ -n "$ISSUER_IN" ] && ARGS+=(--issuer-key "$ISSUER_IN")
+          [ -n "$PUBKEY_IN" ] && ARGS+=(--pubkey "$PUBKEY_IN")
+          surx check-seal "$PATH_IN" --text "${ARGS[@]:-}"
+        else
+          echo "::notice::container is not sealed in a registry; skipping check-seal"
         fi
