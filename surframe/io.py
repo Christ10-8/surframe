@@ -697,8 +697,16 @@ def read(
     if head is not None:
         out = out.head(head)
 
-    # Save usage metric (one file per unique timestamp)
-    try:
+    # Save usage metric (one file per unique timestamp) — opt-in since 0.4.1.
+    # This wrote a NEW zip entry on every single read, plus rewrote
+    # profiles/usage.json. Both live in regions excluded from the signature, so
+    # verification kept passing, but the container still grew by one file per read
+    # and its sha256 changed every time it was opened. For a format whose whole
+    # pitch is byte-level integrity, a read that mutates the artifact is the wrong
+    # default — and it also requires write access to a file a recipient may hold
+    # read-only. Switch it on with SURX_USAGE_PROFILE=1 when you want the metrics.
+    if str(os.environ.get("SURX_USAGE_PROFILE", "0")).lower() in ("1", "true", "yes"):
+      try:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         usage_rec = {"ts": ts, "where": where, "columns": cols_req, "bytes_read": int(bytes_read), "chunks_scanned": int(chunks_scanned), "as_of": as_of}
         usage_dir = _posix_join("profiles", "usage")
@@ -715,36 +723,46 @@ def read(
                         break
                     i += 1
             _zip_write_json(zfa, usage_path, usage_rec)
-    except Exception:
+      except Exception:
         pass
 
-    try:
+      try:
         _update_usage_agg(path)
-    except Exception:
+      except Exception:
         pass
 
-    # ---- Access audit (3.3) ----
-    try:
-        duration_ms = int((time.perf_counter() - t0) * 1000)
-        cols_log = list(cols_req) if cols_req else None
-        user = os.environ.get("SURX_USER") or getpass.getuser()
-        client = os.environ.get("SURX_CLIENT") or "py"
-        evt = {
-            "op": "read",
-            "where": where,
-            "cols": cols_log,
-            "user": user,
-            "client": client,
-            "bytes_read": int(bytes_read),
-            "chunks_scanned": int(chunks_scanned),
-            "duration_ms": duration_ms,
-        }
-        if as_of:
-            evt["as_of"] = as_of
-        append_audit_event(path, evt)  # optional signing via SURX_AUDIT_SIGN
-    except Exception:
-        # Never break the read because of audit failures
-        pass
+    # ---- Access audit (3.3, opt-in since 0.4.1) ----
+    # Reading used to append an audit event unconditionally, which meant a read
+    # MUTATED a signed container. Three consequences, all bad for an artifact
+    # whose whole purpose is being evidence: the file had to be writable, two
+    # people reading the same container ended up with different bytes, and — since
+    # 0.4.0 counts post-signing appends as unattested — a plain read made the
+    # container fail its own verification.
+    #
+    # Access logging is still available for tracked internal pipelines, but it is
+    # now something you switch on deliberately:  SURX_AUDIT_ACCESS=1
+    if str(os.environ.get("SURX_AUDIT_ACCESS", "0")).lower() in ("1", "true", "yes"):
+        try:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            cols_log = list(cols_req) if cols_req else None
+            user = os.environ.get("SURX_USER") or getpass.getuser()
+            client = os.environ.get("SURX_CLIENT") or "py"
+            evt = {
+                "op": "read",
+                "where": where,
+                "cols": cols_log,
+                "user": user,
+                "client": client,
+                "bytes_read": int(bytes_read),
+                "chunks_scanned": int(chunks_scanned),
+                "duration_ms": duration_ms,
+            }
+            if as_of:
+                evt["as_of"] = as_of
+            append_audit_event(path, evt)
+        except Exception:
+            # Never break the read because of audit failures
+            pass
 
     return out
 

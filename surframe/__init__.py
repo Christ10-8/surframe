@@ -8,7 +8,7 @@ an audit verifier, and multi-call encryption without data loss.
 """
 from __future__ import annotations
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # ---- Core: SURX container ----
 from .io import (

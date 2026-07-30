@@ -28,7 +28,7 @@ inputs:
       integrity check, so installing it from a floating range would mean the
       verifier itself is unverified.
     required: false
-    default: "==0.4.0"
+    default: "==0.4.1"
   fail-on-self-attested:
     description: "Fail the job when no pubkey was supplied, instead of only warning."
     required: false
@@ -47,7 +47,7 @@ runs:
         set -euo pipefail
         case "$SURFRAME_VERSION" in
           "=="*) : ;;
-          *) echo "::error::surframe-version must be an exact pin, e.g. '==0.4.0' (got '$SURFRAME_VERSION')"; exit 1 ;;
+          *) echo "::error::surframe-version must be an exact pin, e.g. '==0.4.1' (got '$SURFRAME_VERSION')"; exit 1 ;;
         esac
         python -m pip install --disable-pip-version-check "surframe$SURFRAME_VERSION"
     - shell: bash
